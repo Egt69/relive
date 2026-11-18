@@ -10,6 +10,9 @@
   <meta property="og:type" content="website" />
   <title>RELIVE — Retium Network Dashboard</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="preconnect" href="https://rpc.retium.org" crossorigin />
   <link rel="preconnect" href="https://api.retium.money" crossorigin />
   <link rel="stylesheet" href="assets/styles.css" />
@@ -72,7 +75,7 @@
             </a>
             <a class="btn btn-ghost" href="#nft">Open NFT studio</a>
           </div>
-          <p class="hero-note">No API key required · live tick every 3s · feeds every 4s</p>
+          <p class="hero-note">No API key · live tick 3s · feeds 4s</p>
         </div>
 
         <div class="hero-status" aria-label="Network status">
@@ -237,7 +240,7 @@
               <button class="btn btn-primary" type="submit">Load</button>
             </form>
             <div class="nft-gallery" id="wallet-nft-result">
-              <div class="empty-state">Enter a wallet address to load its NFT gallery.</div>
+              <div class="empty-state empty-state-actions">Enter a wallet address to load its NFT gallery, or grab the most recent on-chain holder.<br /><button class="btn btn-primary btn-sm" type="button" data-load-holder>Load latest NFT holder</button></div>
             </div>
           </div>
         </div>

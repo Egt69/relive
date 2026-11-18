@@ -8,8 +8,9 @@ A real-time, brand-forward dashboard for the [Retium](https://retium.net) networ
   <img src="docs/mobile.png" alt="RELIVE on mobile" width="320" />
 </p>
 
-## Live, by default
+## Live, from the chain
 
+- NFT collections are discovered from recent on-chain activity — **no hardcoded or default collections**.
 - **Tick + RPC latency** refresh every **3 seconds**.
 - **Transaction and block feeds** refresh every **4 seconds**, with new rows highlighted as they land.
 - **Aggregate panels** (stats, staking, economy, fees) refresh every **10 seconds**.
@@ -23,7 +24,7 @@ A real-time, brand-forward dashboard for the [Retium](https://retium.net) networ
 - **Transaction volume** — histogram for 24 hours, 7 days or 30 days, with in-range totals, per-bucket averages and the busiest bucket.
 - **Network health** — keepers, suits, workers and RPC nodes online, plus active/new wallet counts over 24h, 7d and 30d.
 - **Fee flow** — collected, burned, workers, foundation, treasury, suits and keepers.
-- **NFT studio** — tracked RCP collections with **cover artwork**, per-token metadata, mint/transfer/burn events with thumbnails, wallet gallery with full artwork, and a collection tracker. Artwork is resolved through IPFS metadata and rendered as optimized thumbnails.
+- **NFT studio** — discovers RCP NFT contracts from recent transactions (no seeded defaults), shows collection cover artwork, per-token metadata, mint/transfer/burn events with thumbnails, wallet gallery with full artwork, and a manual contract tracker. Artwork is resolved through IPFS metadata and rendered as optimized thumbnails.
 - **Staking** — stake vs. unstake volume, validator registry activity, node operators and net staking direction.
 - **Economy** — RTD supply, reserves, customers and safehouse mint/redeem/lock operations.
 - **Explorer** — transactions, blocks, wallets and contracts through the network's lookup endpoint.
@@ -59,12 +60,12 @@ NFT artwork: `token_uri` points to IPFS metadata (name, image, attributes). The 
 
 ## NFT totals — honest caveat
 
-Retium's public API exposes NFTs **per wallet** and **per contract**; there is no global network NFT counter. Instead of inventing a number, RELIVE indexes a list of tracked RCP contracts (two are seeded), sums their `total_supply`, and counts their on-chain events. The UI labels this as **across tracked contracts**. Add more collections with the form in the NFT section to widen the index.
+Retium's public API exposes NFTs **per wallet** and **per contract**; there is no global network NFT counter. Instead of inventing a number, RELIVE scans recent transactions for NFT contract calls, verifies each contract via `/contract/{id}`, and indexes the collections it finds. The UI labels totals as **across tracked contracts**. You can add any contract id yourself with the form in the NFT section.
 
 ## Tech
 
 - Plain HTML, CSS and JavaScript — no framework, no bundler, no build step.
-- Orange/green web3 visual system with a live particle-mesh hero, glass panels and gradient data accents.
+- Orange/green brand accents on a restrained dark canvas with Inter + Space Grotesk typography, flat surfaces, hairline borders and tabular numeric displays.
 - Responsive from small phones to wide desktops; honors `prefers-reduced-motion`.
 - `localStorage` is used only for tracked collections, chart range and NFT metadata cache. No cookies, no analytics, no tracking.
 
@@ -115,7 +116,7 @@ Then on GitHub: **Settings → Pages → Source: GitHub Actions**. The site appe
 
 ## Customization
 
-- **Seed collections / names** — edit `DEFAULT_COLLECTION`, `SECOND_COLLECTION` and `DEFAULT_NAMES` in `assets/app.js`.
+- **NFT discovery** — `NFT_CALL_METHODS` and `discoverNftCollections()` in `assets/app.js` control how contracts are found from live transactions.
 - **Refresh cadence** — `startTimers()`: tick 3s, feeds 4s, core 10s, NFT 60s.
 - **Endpoints** — `API`, `MONEY` and `IPFS_GATEWAYS` constants at the top of `assets/app.js`.
 - **Look and feel** — color tokens in `:root`, then the RELIVE identity layer at the bottom of `assets/styles.css`.

@@ -13,12 +13,10 @@
 
   const API = 'https://rpc.retium.org/api';
   const MONEY = 'https://api.retium.money/api/summary';
-  const DEFAULT_COLLECTION = '99e2b4b543f806aed34ee04d346b90f81c89b9a2ee62fc17ed0452ac8025c14c';
-  const SECOND_COLLECTION = 'a81065b519033a861ffeaac9e4bb02ffec10ff995617e61f8d979cd7654874a4';
-  const DEFAULT_NAMES = {
-    [DEFAULT_COLLECTION]: 'Retium NFTs',
-    [SECOND_COLLECTION]: 'Parrot Collection'
-  };
+  const NFT_CALL_METHODS = new Set([
+    'mint', 'batch_mint', 'batch_mint_base', 'drop_mint', 'drop_mint_pick',
+    'transfer', 'batch_transfer', 'burn', 'batch_burn', 'reveal', 'init_drop'
+  ]);
   const STORE_COLLECTIONS = 'retium-live.collections.v1';
   const STORE_NAMES = 'retium-live.names.v1';
   const STORE_RANGE = 'retium-live.range.v1';
@@ -99,8 +97,7 @@
     lastSync: null,
     lastTickAt: null,
     lastTopTx: null,
-    seenTx: new Set(),
-    galleryAutoLoaded: false
+    seenTx: new Set()
   };
 
   let coreBusy = false;
@@ -217,9 +214,6 @@
       if (Array.isArray(raw)) list = raw.filter((id) => /^[0-9a-f]{64}$/i.test(String(id)));
     } catch { list = []; }
     const normalized = list.map((id) => String(id).toLowerCase());
-    [SECOND_COLLECTION, DEFAULT_COLLECTION].forEach((seed) => {
-      if (!normalized.includes(seed)) normalized.unshift(seed);
-    });
     return Array.from(new Set(normalized)).slice(0, 12);
   }
 
@@ -239,7 +233,7 @@
   }
 
   function collectionName(id) {
-    return DEFAULT_NAMES[id] || state.names[id] || `Collection ${short(id, 6, 4)}`;
+    return state.names[id] || `Collection ${short(id, 6, 4)}`;
   }
 
   let toastTimer = null;
@@ -1174,7 +1168,7 @@
     const list = $('#nft-collections');
     if (list) {
       if (!nft.collections.length) {
-        list.innerHTML = '<div class="empty-state">No collections indexed yet. Paste an NFT contract id below.</div>';
+        list.innerHTML = `<div class="empty-state empty-state-actions">No collections tracked yet.<br />Scan recent chain activity to discover NFT contracts, or paste a contract id below.<br /><button class="btn btn-primary btn-sm" type="button" data-discover>Scan chain for NFTs</button></div>`;
       } else {
         list.innerHTML = nft.collections.map((item) => `<div class="collection-row">
           <div class="collection-cover"${item.coverToken !== null && item.coverToken !== undefined ? ` data-nft-contract="${esc(item.id)}" data-nft-token="${esc(item.coverToken)}"` : ''}>
@@ -1193,7 +1187,7 @@
           </div>
           <div class="collection-actions">
             <button class="icon-btn" type="button" data-search="${esc(item.id)}" title="Open contract in explorer">↗</button>
-            ${item.id === DEFAULT_COLLECTION ? '' : `<button class="icon-btn danger" type="button" data-remove-collection="${esc(item.id)}" title="Stop tracking this collection">×</button>`}
+            <button class="icon-btn danger" type="button" data-remove-collection="${esc(item.id)}" title="Stop tracking this collection">×</button>
           </div>
         </div>`).join('');
         queueNftArt(list, { eager: true });
@@ -1330,15 +1324,55 @@
     }
   }
 
-  function seedWalletAddress() {
-    const first = state.nft?.collections?.find((item) => item.ok) || state.nft?.collections?.[0];
-    if (!first) return null;
-    const holders = (first.events || [])
-      .filter((event) => event.to && /^rete[a-z0-9]+$/i.test(event.to))
-      .sort((a, b) => toMs(b.ts) - toMs(a.ts));
-    if (holders.length) return holders[0].to;
-    if (first.deployer && /^rete[a-z0-9]+$/i.test(first.deployer)) return first.deployer;
-    return null;
+  /* Discover NFT contracts from recent on-chain activity — no hardcoded seeds. */
+  async function discoverNftCollections({ silent = false } = {}) {
+    const candidates = new Set();
+    for (let page = 0; page < 3 && candidates.size < 16; page += 1) {
+      const res = await api(`/transactions?limit=100&offset=${page * 100}`);
+      const list = Array.isArray(res?.transactions) ? res.transactions : [];
+      if (!list.length) break;
+      list.forEach((tx) => {
+        const call = tx.call;
+        const method = String(call?.method || '').toLowerCase();
+        const contract = String(call?.contract || '').toLowerCase();
+        if (contract && NFT_CALL_METHODS.has(method)) candidates.add(contract);
+      });
+    }
+
+    const ids = Array.from(candidates).slice(0, 12);
+    const found = [];
+    for (let i = 0; i < ids.length; i += 4) {
+      const batch = ids.slice(i, i + 4);
+      const results = await Promise.allSettled(batch.map((id) => api(`/contract/${id}`)));
+      results.forEach((result, index) => {
+        const meta = result.status === 'fulfilled' ? result.value : null;
+        const type = String(meta?.rcp_metadata?.rcp_type || '').toUpperCase();
+        if (type.includes('NFT') && !state.collections.includes(batch[index])) found.push(batch[index]);
+      });
+    }
+
+    state.collections = Array.from(new Set([...found, ...state.collections])).slice(0, 12);
+    saveCollections();
+    if (!silent) toast(found.length ? `Discovered ${found.length} NFT collection${found.length === 1 ? '' : 's'}` : 'No NFT contracts found in recent activity');
+    return found;
+  }
+
+  async function ensureNftIndex() {
+    if (!state.collections.length) {
+      await discoverNftCollections({ silent: true });
+    }
+    await loadNFT({ silent: true });
+  }
+
+  function latestHolderAddress() {
+    const collections = state.nft?.collections || [];
+    for (const collection of collections) {
+      const holders = (collection.events || [])
+        .filter((event) => event.to && /^rete[a-z0-9]+$/i.test(event.to))
+        .sort((a, b) => toMs(b.ts) - toMs(a.ts));
+      if (holders.length) return holders[0].to;
+    }
+    return collections.find((item) => item.ok)?.deployer || null;
   }
 
   /* ---------------- staking ---------------- */
@@ -2133,12 +2167,42 @@
     });
 
     $('#try-nft')?.addEventListener('click', () => {
-      const id = state.collections[0] || DEFAULT_COLLECTION;
+      const id = state.collections[0];
+      if (!id) {
+        toast('Scan the chain or track an NFT contract first', true);
+        return;
+      }
       $('#search-input').value = id;
       runSearch(id);
     });
 
-    document.addEventListener('click', (event) => {
+    document.addEventListener('click', async (event) => {
+      const discover = event.target.closest('[data-discover]');
+      if (discover) {
+        discover.disabled = true;
+        try {
+          const found = await discoverNftCollections({ silent: true });
+          await loadNFT({ silent: true });
+          toast(found.length ? `Discovered ${found.length} NFT collection${found.length === 1 ? '' : 's'}` : 'No NFT contracts found in recent activity');
+        } finally {
+          discover.disabled = false;
+        }
+        return;
+      }
+
+      const holder = event.target.closest('[data-load-holder]');
+      if (holder) {
+        const address = latestHolderAddress();
+        if (!address) {
+          toast('No NFT holder found yet', true);
+          return;
+        }
+        const input = $('#wallet-nft-input');
+        if (input) input.value = address;
+        loadWalletGallery(address);
+        return;
+      }
+
       const retry = event.target.closest('[data-retry]');
       if (retry) {
         const scope = retry.getAttribute('data-retry');
@@ -2168,10 +2232,6 @@
       const remove = event.target.closest('[data-remove-collection]');
       if (remove) {
         const id = remove.getAttribute('data-remove-collection');
-        if (id === DEFAULT_COLLECTION) {
-          toast('The seeded collection always stays tracked');
-          return;
-        }
         state.collections = state.collections.filter((item) => item !== id);
         saveCollections();
         loadNFT({ silent: true });
@@ -2250,15 +2310,7 @@
     renderTick();
     loadCore();
     loadFeeds();
-    loadNFT({ silent: true }).then(() => {
-      if (state.galleryAutoLoaded) return;
-      state.galleryAutoLoaded = true;
-      const seed = seedWalletAddress();
-      if (!seed) return;
-      const input = $('#wallet-nft-input');
-      if (input && !input.value) input.value = seed;
-      loadWalletGallery(seed, { auto: true });
-    });
+    ensureNftIndex();
     startTimers();
   }
 
