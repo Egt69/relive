@@ -14,10 +14,23 @@
   const API = 'https://rpc.retium.org/api';
   const MONEY = 'https://api.retium.money/api/summary';
   const DEFAULT_COLLECTION = '99e2b4b543f806aed34ee04d346b90f81c89b9a2ee62fc17ed0452ac8025c14c';
-  const DEFAULT_NAMES = { [DEFAULT_COLLECTION]: 'Retium NFTs' };
+  const SECOND_COLLECTION = 'a81065b519033a861ffeaac9e4bb02ffec10ff995617e61f8d979cd7654874a4';
+  const DEFAULT_NAMES = {
+    [DEFAULT_COLLECTION]: 'Retium NFTs',
+    [SECOND_COLLECTION]: 'Parrot Collection'
+  };
   const STORE_COLLECTIONS = 'retium-live.collections.v1';
   const STORE_NAMES = 'retium-live.names.v1';
   const STORE_RANGE = 'retium-live.range.v1';
+  const STORE_META = 'retium-live.nftmeta.v1';
+  const META_TTL = 7 * 24 * 60 * 60 * 1000;
+
+  // Public IPFS gateways. The first one that answers wins.
+  const IPFS_GATEWAYS = [
+    'https://ipfs.filebase.io/ipfs/',
+    'https://gateway.pinata.cloud/ipfs/',
+    'https://ipfs.io/ipfs/'
+  ];
 
   const TYPE_META = [
     { key: 'transfer', label: 'Transfers', color: '#4ade80' },
@@ -83,14 +96,20 @@
     nft: null,
     searchToken: 0,
     prevKpi: {},
-    lastSync: null
+    lastSync: null,
+    lastTickAt: null,
+    lastTopTx: null,
+    seenTx: new Set(),
+    galleryAutoLoaded: false
   };
 
   let coreBusy = false;
   let feedBusy = false;
   let nftBusy = false;
+  let tickBusy = false;
   let coreRetry = null;
   let feedRetry = null;
+  let tickRetry = null;
 
   /* ---------------- tiny helpers ---------------- */
 
@@ -198,7 +217,9 @@
       if (Array.isArray(raw)) list = raw.filter((id) => /^[0-9a-f]{64}$/i.test(String(id)));
     } catch { list = []; }
     const normalized = list.map((id) => String(id).toLowerCase());
-    if (!normalized.includes(DEFAULT_COLLECTION)) normalized.unshift(DEFAULT_COLLECTION);
+    [SECOND_COLLECTION, DEFAULT_COLLECTION].forEach((seed) => {
+      if (!normalized.includes(seed)) normalized.unshift(seed);
+    });
     return Array.from(new Set(normalized)).slice(0, 12);
   }
 
@@ -218,7 +239,7 @@
   }
 
   function collectionName(id) {
-    return DEFAULT_NAMES[id] || state.names[id] || 'RCP collection';
+    return DEFAULT_NAMES[id] || state.names[id] || `Collection ${short(id, 6, 4)}`;
   }
 
   let toastTimer = null;
@@ -360,8 +381,7 @@
 
     if (state.stats || state.tick) {
       setApiError('');
-      state.lastSync = new Date();
-      setText('#last-sync', state.lastSync.toLocaleTimeString('en-US', { hour12: false }));
+      markSync();
     } else if (errors.length) {
       setApiError('Could not reach the Retium public API. Check your connection, an ad-blocker, or try again in a moment.');
       toast('Retium API unreachable', true);
@@ -395,6 +415,55 @@
     } catch (err) {
       console.warn('histogram', err);
       toast('Could not load the transaction chart', true);
+    }
+  }
+
+  /* ---------------- realtime tick ---------------- */
+
+  function markSync() {
+    state.lastSync = Date.now();
+    setText('#last-sync', new Date(state.lastSync).toLocaleTimeString('en-US', { hour12: false }));
+    updateSyncAge();
+  }
+
+  function updateSyncAge() {
+    const el = $('#sync-age');
+    if (!el) return;
+    if (!state.lastSync) { el.textContent = ''; return; }
+    const seconds = Math.max(0, Math.floor((Date.now() - state.lastSync) / 1000));
+    el.textContent = seconds < 2 ? '· just now' : `· ${seconds}s ago`;
+    el.classList.toggle('stale', seconds > 20);
+  }
+
+  function flashTick() {
+    const el = $('#hero-tick');
+    if (!el) return;
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+  }
+
+  async function loadTick() {
+    if (tickBusy) return;
+    tickBusy = true;
+    try {
+      const result = await timed(api('/tick/current', { timeout: 8000 }));
+      const previous = state.tick ? Number(state.tick.tick) : null;
+      state.tick = result.data;
+      state.rpcMs = result.ms;
+      renderTick();
+      if (previous !== null && Number(result.data?.tick) > previous) flashTick();
+      markSync();
+    } catch (err) {
+      console.warn('tick', err);
+      if (!tickRetry) {
+        tickRetry = setTimeout(() => {
+          tickRetry = null;
+          loadTick();
+        }, 8000);
+      }
+    } finally {
+      tickBusy = false;
     }
   }
 
@@ -811,6 +880,9 @@
       return acc;
     }, { total: 0, mints: 0, transfers: 0, burns: 0 });
 
+    const minted = parsedEvents.find((event) => event.kind === 'mint' && event.tokenId !== null);
+    const coverToken = minted ? Number(minted.tokenId) : (supply ? 1 : null);
+
     return {
       id,
       name,
@@ -819,11 +891,237 @@
       deployer: meta?.deployer || null,
       tick: meta?.deployed_at_tick ?? null,
       supply,
+      coverToken,
       counts,
       events: parsedEvents,
       ok: Boolean(meta)
     };
   }
+
+  /* ---------------- NFT artwork (IPFS metadata) ---------------- */
+
+  const metaCache = new Map();
+  const metaInflight = new Map();
+  let metaDisk = null;
+
+  function metaStore() {
+    if (metaDisk) return metaDisk;
+    try {
+      const raw = JSON.parse(readStore(STORE_META) || '{}');
+      metaDisk = raw && typeof raw === 'object' ? raw : {};
+    } catch { metaDisk = {}; }
+    return metaDisk;
+  }
+
+  function cacheMeta(key, value) {
+    metaCache.set(key, value);
+    const store = metaStore();
+    store[key] = { t: Date.now(), v: value };
+    const keys = Object.keys(store);
+    if (keys.length > 160) {
+      keys.slice(0, keys.length - 160).forEach((old) => delete store[old]);
+    }
+    try { writeStore(STORE_META, JSON.stringify(store)); } catch { /* quota */ }
+  }
+
+  function cachedMeta(key) {
+    if (metaCache.has(key)) return metaCache.get(key);
+    const hit = metaStore()[key];
+    if (hit && Date.now() - Number(hit.t || 0) < META_TTL && hit.v) {
+      metaCache.set(key, hit.v);
+      return hit.v;
+    }
+    return null;
+  }
+
+  function ipfsPath(uri) {
+    const value = String(uri || '').trim();
+    if (!value) return null;
+    if (value.startsWith('ipfs://ipfs/')) return value.slice(11);
+    if (value.startsWith('ipfs://')) return value.slice(7);
+    if (value.startsWith('/ipfs/')) return value.slice(6);
+    if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[a-z0-9]+)$/i.test(value)) return value;
+    return null;
+  }
+
+  function uriCandidates(uri) {
+    const value = String(uri || '').trim();
+    if (!value) return [];
+    const path = ipfsPath(value);
+    if (path) return IPFS_GATEWAYS.map((gateway) => gateway + path.replace(/^\/+/, ''));
+    if (/^https?:\/\//i.test(value)) return [value];
+    return [];
+  }
+
+  // Thumbnails go through a fast image proxy when the source is IPFS, so large
+  // artwork files never block the page. Direct URLs are used as-is.
+  function thumbnailCandidates(uri) {
+    const urls = uriCandidates(uri);
+    const out = [];
+    urls.forEach((url) => {
+      const path = ipfsPath(uri);
+      if (path && url.includes('ipfs.filebase.io')) {
+        out.push(`https://images.weserv.nl/?url=${encodeURIComponent(`ipfs.filebase.io/ipfs/${path}`)}&w=480&h=480&fit=cover&output=webp&q=80`);
+      }
+      out.push(url);
+    });
+    return out;
+  }
+
+  async function fetchJsonUri(uri) {
+    const value = String(uri || '').trim();
+    if (value.startsWith('data:application/json')) {
+      const comma = value.indexOf(',');
+      const head = value.slice(0, comma);
+      const body = value.slice(comma + 1);
+      return JSON.parse(head.includes('base64') ? atob(body) : decodeURIComponent(body));
+    }
+    const urls = uriCandidates(value);
+    if (!urls.length) throw new Error('Unsupported metadata URI');
+    let lastError = null;
+    for (const url of urls) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 9000);
+      try {
+        const res = await fetch(url, {
+          signal: ctrl.signal,
+          cache: 'force-cache',
+          headers: { Accept: 'application/json' }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        lastError = err;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    throw lastError || new Error('Metadata fetch failed');
+  }
+
+  function normalizeImage(value) {
+    const image = String(value || '').trim();
+    if (!image) return '';
+    if (image.startsWith('ipfs://') || image.startsWith('/ipfs/') || /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/.test(image)) {
+      const urls = uriCandidates(image);
+      return urls[0] || '';
+    }
+    return image;
+  }
+
+  async function getNftMeta(contractId, tokenId) {
+    const key = `${contractId}:${tokenId}`;
+    const cached = cachedMeta(key);
+    if (cached) return cached;
+    if (metaInflight.has(key)) return metaInflight.get(key);
+
+    const promise = (async () => {
+      const query = await api(
+        `/contract/${contractId}/query?method=token_uri&args=${encodeURIComponent(tokenId)}`,
+        { timeout: 10000 }
+      );
+      let uri = query?.output;
+      if (typeof uri === 'string') {
+        try {
+          const parsed = JSON.parse(uri);
+          uri = (parsed && typeof parsed === 'object') ? parsed : String(parsed);
+        } catch { /* plain URI */ }
+      }
+
+      let meta = null;
+      if (uri && typeof uri === 'object') meta = uri;
+      else if (typeof uri === 'string' && uri.trim()) meta = await fetchJsonUri(uri);
+      if (!meta || typeof meta !== 'object') throw new Error('No metadata');
+
+      const record = {
+        name: typeof meta.name === 'string' ? meta.name : '',
+        description: typeof meta.description === 'string' ? meta.description : '',
+        image: normalizeImage(meta.image || meta.image_url || meta.imageUrl || ''),
+        attributes: Array.isArray(meta.attributes) ? meta.attributes.slice(0, 12) : []
+      };
+      if (record.image || record.name) cacheMeta(key, record);
+      return record;
+    })().finally(() => metaInflight.delete(key));
+
+    metaInflight.set(key, promise);
+    return promise;
+  }
+
+  let artActive = 0;
+  const artQueue = [];
+
+  function pumpArt() {
+    while (artActive < 4 && artQueue.length) {
+      const el = artQueue.shift();
+      if (!el || !el.isConnected || el.dataset.nftState === 'ready' || el.dataset.nftState === 'loading') continue;
+      artActive += 1;
+      loadNftArt(el).finally(() => {
+        artActive -= 1;
+        pumpArt();
+      });
+    }
+  }
+
+  function queueNftArt(root = document, { eager = true } = {}) {
+    const targets = $$('[data-nft-contract][data-nft-token]', root);
+    targets.forEach((el) => {
+      if (el.dataset.nftState) return;
+      el.dataset.nftState = 'queued';
+      if (eager) {
+        artQueue.push(el);
+        pumpArt();
+      } else if ('IntersectionObserver' in window) {
+        if (!queueNftArt.observer) {
+          queueNftArt.observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+              if (!entry.isIntersecting) return;
+              queueNftArt.observer.unobserve(entry.target);
+              artQueue.push(entry.target);
+              pumpArt();
+            });
+          }, { rootMargin: '300px' });
+        }
+        queueNftArt.observer.observe(el);
+      } else {
+        artQueue.push(el);
+        pumpArt();
+      }
+    });
+  }
+
+  async function loadNftArt(el) {
+    const contractId = el.dataset.nftContract;
+    const tokenId = el.dataset.nftToken;
+    if (!contractId || tokenId === undefined || tokenId === '') return;
+    el.dataset.nftState = 'loading';
+    try {
+      const meta = await getNftMeta(contractId, tokenId);
+      const image = el.querySelector('img');
+      const nameEl = el.closest('.nft-card')?.querySelector('[data-nft-name]');
+      if (nameEl && meta.name) {
+        nameEl.textContent = meta.name;
+        nameEl.title = meta.name;
+      }
+      const candidates = thumbnailCandidates(meta.image);
+      if (!image || !candidates.length) throw new Error('No image');
+      let index = 0;
+      image.onload = () => {
+        el.dataset.nftState = 'ready';
+        el.classList.add('has-art');
+        image.classList.add('is-loaded');
+      };
+      image.onerror = () => {
+        if (index < candidates.length) image.src = candidates[index++];
+        else el.dataset.nftState = 'error';
+      };
+      image.alt = meta.name ? `${meta.name} — NFT #${tokenId}` : `NFT #${tokenId}`;
+      image.hidden = false;
+      image.src = candidates[index++];
+    } catch (err) {
+      el.dataset.nftState = 'error';
+    }
+  }
+
 
   async function loadNFT({ silent = false } = {}) {
     if (nftBusy) return;
@@ -879,8 +1177,12 @@
         list.innerHTML = '<div class="empty-state">No collections indexed yet. Paste an NFT contract id below.</div>';
       } else {
         list.innerHTML = nft.collections.map((item) => `<div class="collection-row">
+          <div class="collection-cover"${item.coverToken !== null && item.coverToken !== undefined ? ` data-nft-contract="${esc(item.id)}" data-nft-token="${esc(item.coverToken)}"` : ''}>
+            <span class="nft-fallback">RCP</span>
+            <img hidden alt="" loading="lazy" decoding="async" />
+          </div>
           <div class="collection-info">
-            <div class="collection-name">${esc(item.ok ? collectionName(item.id) : 'Unavailable contract')} <span class="tag">RCP</span></div>
+            <div class="collection-name">${esc(item.ok ? item.name : 'Unavailable contract')} <span class="tag">RCP</span></div>
             <span class="collection-id" title="${esc(item.id)}">${esc(item.id)}</span>
             <div class="collection-stats">
               <span>Supply <b>${item.supply === null ? '—' : num(item.supply)}</b></span>
@@ -894,6 +1196,7 @@
             ${item.id === DEFAULT_COLLECTION ? '' : `<button class="icon-btn danger" type="button" data-remove-collection="${esc(item.id)}" title="Stop tracking this collection">×</button>`}
           </div>
         </div>`).join('');
+        queueNftArt(list, { eager: true });
       }
     }
 
@@ -905,12 +1208,13 @@
       } else {
         body.innerHTML = events.map((event) => `<tr>
           <td><span class="ev-chip ${event.kind}">${event.kind === 'mint' ? 'Mint' : event.kind === 'burn' ? 'Burn' : event.kind === 'transfer' ? 'Transfer' : esc(event.type)}</span></td>
-          <td class="amount">${event.tokenId === null ? '—' : `#${esc(event.tokenId)}`}</td>
+          <td class="amount"><span class="nft-token">${event.tokenId === null ? '' : `<span class="nft-mini" data-nft-contract="${esc(event.collection)}" data-nft-token="${esc(event.tokenId)}"><img hidden alt="" loading="lazy" decoding="async" /></span>`}${event.tokenId === null ? '—' : `#${esc(event.tokenId)}`}</span></td>
           <td class="addr" title="${esc(event.from || '')}">${event.from ? esc(short(event.from, 8, 6)) : '—'}</td>
           <td class="addr" title="${esc(event.to || '')}">${event.to ? esc(short(event.to, 8, 6)) : '—'}</td>
-          <td class="addr hide-sm" title="${esc(event.collection)}">${esc(short(event.collection, 8, 6))}</td>
+          <td class="addr hide-sm" title="${esc(event.collection)}">${esc(event.collectionName || short(event.collection, 8, 6))}</td>
           <td class="addr" title="${esc(new Date(toMs(event.ts)).toISOString())}">${esc(timeAgo(event.ts))}</td>
         </tr>`).join('');
+        queueNftArt(body, { eager: true });
       }
     }
   }
@@ -943,11 +1247,13 @@
     return true;
   }
 
-  async function loadWalletGallery(address) {
+  const GENERIC_COLLECTION_NAMES = new Set(['', 'nft', 'nfts', 'token', 'tokens', 'collection', 'rcp collection']);
+
+  async function loadWalletGallery(address, { auto = false } = {}) {
     const addr = String(address || '').trim();
     const host = $('#wallet-nft-result');
     const pill = $('#nft-wallet-count');
-    if (!addr) return;
+    if (!addr || !host) return;
     if (!/^rete[a-z0-9]+$/i.test(addr) || addr.length < 40) {
       host.innerHTML = '<div class="empty-state">That does not look like a Retium wallet address. It should start with “rete”.</div>';
       if (pill) pill.textContent = '—';
@@ -962,15 +1268,26 @@
       const nfts = Array.isArray(data?.nfts) ? data.nfts : [];
       const total = Number(data?.total_count) || nfts.length;
 
+      let collectionsChanged = false;
+      let namesChanged = false;
       nfts.forEach((nft) => {
-        if (nft.contract_id && nft.collection) {
-          const key = String(nft.contract_id).toLowerCase();
-          if (state.names[key] !== nft.collection) {
-            state.names[key] = nft.collection;
-          }
+        const key = String(nft.contract_id || '').toLowerCase();
+        if (!key) return;
+        if (!state.collections.includes(key) && state.collections.length < 12) {
+          state.collections.push(key);
+          collectionsChanged = true;
+        }
+        const label = String(nft.collection || '').trim();
+        if (label && !GENERIC_COLLECTION_NAMES.has(label.toLowerCase()) && state.names[key] !== label) {
+          state.names[key] = label;
+          namesChanged = true;
         }
       });
-      saveNames();
+      if (namesChanged) saveNames();
+      if (collectionsChanged) {
+        saveCollections();
+        setTimeout(() => loadNFT({ silent: true }), 250);
+      }
 
       if (pill) pill.textContent = `${num(total)} NFT${total === 1 ? '' : 's'}`;
       if (!nfts.length) {
@@ -979,21 +1296,31 @@
       }
 
       host.innerHTML = nfts.map((nft) => {
+        const contract = String(nft.contract_id || '').toLowerCase();
         const id = String(nft.token_id ?? '?');
-        const hash = Array.from(id).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-        const hue = 110 + (hash % 90);
-        return `<article class="nft-card">
-          <div class="nft-thumb" style="--h:${hue}">#${esc(id)}</div>
+        const name = contract ? collectionName(contract) : (nft.collection || 'NFT');
+        return `<article class="nft-card"${contract ? ` data-nft-contract="${esc(contract)}" data-nft-token="${esc(nft.token_id ?? '')}"` : ''}>
+          <div class="nft-thumb">
+            <span class="nft-fallback">#${esc(id)}</span>
+            <img hidden alt="" loading="lazy" decoding="async" />
+          </div>
           <div class="nft-meta">
-            <span class="nft-collection" title="${esc(nft.collection || 'NFT')}">${esc(nft.contract_id ? collectionName(String(nft.contract_id).toLowerCase()) : (nft.collection || 'NFT'))}</span>
-            <span class="nft-contract" title="${esc(nft.contract_id || '')}">${esc(short(nft.contract_id || '', 8, 6))}</span>
+            <span class="nft-name" data-nft-name>#${esc(id)}</span>
+            <span class="nft-collection" title="${esc(name)}">${esc(name)}</span>
+            <span class="nft-contract" title="${esc(contract)}">token #${esc(id)} · ${esc(short(contract, 6, 4))}</span>
           </div>
         </article>`;
       }).join('') + (total > nfts.length
         ? `<div class="empty-state">Showing ${num(nfts.length)} of ${num(total)} NFTs.</div>`
         : '');
 
+      // Load art for the first cards immediately, lazy-load the rest when scrolled into view.
+      queueNftArt(host, { eager: nfts.length <= 12 });
+
       if (state.nft) renderNFT();
+      if (auto && !nfts.length) {
+        host.innerHTML = '<div class="empty-state">The seeded wallet holds no NFTs right now. Try another wallet address.</div>';
+      }
     } catch (err) {
       const message = err.status === 400 || err.status === 404
         ? 'No NFT data for this wallet.'
@@ -1001,6 +1328,17 @@
       host.innerHTML = `<div class="empty-state">${esc(message)}</div>`;
       if (pill) pill.textContent = '—';
     }
+  }
+
+  function seedWalletAddress() {
+    const first = state.nft?.collections?.find((item) => item.ok) || state.nft?.collections?.[0];
+    if (!first) return null;
+    const holders = (first.events || [])
+      .filter((event) => event.to && /^rete[a-z0-9]+$/i.test(event.to))
+      .sort((a, b) => toMs(b.ts) - toMs(a.ts));
+    if (holders.length) return holders[0].to;
+    if (first.deployer && /^rete[a-z0-9]+$/i.test(first.deployer)) return first.deployer;
+    return null;
   }
 
   /* ---------------- staking ---------------- */
@@ -1489,7 +1827,8 @@
 
     body.innerHTML = list.map((tx) => {
       const info = actionInfo(tx.action);
-      return `<tr data-search="${esc(tx.tx_id)}" title="Open ${esc(tx.tx_id)} in the explorer" style="cursor:pointer">
+      const isNew = state.lastTopTx !== null && !state.seenTx.has(tx.tx_id);
+      return `<tr class="${isNew ? 'is-new' : ''}" data-search="${esc(tx.tx_id)}" title="Open ${esc(tx.tx_id)} in the explorer" style="cursor:pointer">
       <td><span class="action" data-action="${esc(info.cls)}">${esc(info.label)}</span></td>
       <td class="amount">${esc(fmtAmount(tx.amount_rtm, 4))}${tx.amount_rtm && Number(tx.amount_rtm) !== 0 ? '<small>RTM</small>' : ''}</td>
       <td class="addr" title="${esc(tx.sender || '')}">${esc(short(tx.sender, 9, 6))}</td>
@@ -1498,6 +1837,12 @@
       <td class="addr" title="${esc(tx.timestamp_readable || '')}">${esc(timeAgo(tx.timestamp))}</td>
     </tr>`;
     }).join('');
+
+    list.forEach((tx) => state.seenTx.add(tx.tx_id));
+    while (state.seenTx.size > 400) {
+      state.seenTx.delete(state.seenTx.values().next().value);
+    }
+    state.lastTopTx = list[0]?.tx_id || state.lastTopTx;
   }
 
   function renderBlocks(totalBlocks) {
@@ -1600,11 +1945,10 @@
     if (!ctx) return;
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const glyphs = '0123456789ABCDEFΔΣΞRETIUM';
+    const palette = ['#ff6a00', '#1f9b3a', '#8b97a8'];
     let width = 0;
     let height = 0;
-    let columns = 0;
-    let drops = [];
+    let nodes = [];
     let frame = 0;
     let active = true;
     let raf = null;
@@ -1617,41 +1961,65 @@
       canvas.width = Math.max(1, Math.floor(width * dpr));
       canvas.height = Math.max(1, Math.floor(height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.font = '12px ui-monospace, monospace';
-      columns = Math.max(1, Math.floor(width / 16));
-      drops = Array.from({ length: columns }, () => Math.random() * (height / 14));
+      const count = Math.max(20, Math.min(68, Math.floor((width * height) / 22000)));
+      nodes = Array.from({ length: count }, () => ({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.28,
+        vy: (Math.random() - 0.5) * 0.28,
+        r: Math.random() * 1.8 + 0.8,
+        color: palette[Math.floor(Math.random() * palette.length)],
+        alpha: Math.random() * 0.5 + 0.35
+      }));
       ctx.clearRect(0, 0, width, height);
-      drawStatic();
-    };
-
-    const drawStatic = () => {
-      if (!width || !height) return;
-      ctx.fillStyle = 'rgba(74,222,128,0.22)';
-      for (let i = 0; i < columns; i += 1) {
-        for (let j = 0; j < 3; j += 1) {
-          const ch = glyphs[Math.floor(Math.random() * glyphs.length)];
-          ctx.fillText(ch, i * 16, (drops[i] + j * 1.6) * 14);
-        }
-      }
     };
 
     const draw = (time) => {
       if (!active) return;
-      if (time - frame < 66) {
+      if (time - frame < 50) {
         raf = requestAnimationFrame(draw);
         return;
       }
       frame = time;
-      ctx.fillStyle = 'rgba(4,8,5,0.16)';
-      ctx.fillRect(0, 0, width, height);
-      for (let i = 0; i < columns; i += 1) {
-        const ch = glyphs[Math.floor(Math.random() * glyphs.length)];
-        const y = drops[i] * 14;
-        ctx.fillStyle = Math.random() > 0.985 ? 'rgba(190,242,100,0.85)' : 'rgba(74,222,128,0.34)';
-        ctx.fillText(ch, i * 16, y);
-        if (y > height && Math.random() > 0.975) drops[i] = 0;
-        drops[i] += 0.5;
+      ctx.clearRect(0, 0, width, height);
+      for (let i = 0; i < nodes.length; i += 1) {
+        const node = nodes[i];
+        node.x += node.vx;
+        node.y += node.vy;
+        if (node.x < -20) node.x = width + 20;
+        if (node.x > width + 20) node.x = -20;
+        if (node.y < -20) node.y = height + 20;
+        if (node.y > height + 20) node.y = -20;
       }
+      for (let i = 0; i < nodes.length; i += 1) {
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const a = nodes[i];
+          const b = nodes[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 130) {
+            ctx.strokeStyle = `rgba(255,106,0,${((1 - dist / 130) * 0.22).toFixed(3)})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+      }
+      nodes.forEach((node) => {
+        ctx.globalAlpha = node.alpha;
+        ctx.fillStyle = node.color;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.r * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = Math.min(1, node.alpha + 0.3);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      });
       raf = requestAnimationFrame(draw);
     };
 
@@ -1834,17 +2202,34 @@
       }, 200);
     });
 
+    // Realtime clock: tick + RPC latency every 3 seconds.
     setInterval(() => {
-      if (document.visibilityState === 'visible') loadCore({ silent: true });
-    }, 15000);
+      if (document.visibilityState === 'visible') loadTick();
+    }, 3000);
 
+    // Live transaction + block feeds every 4 seconds.
     setInterval(() => {
       if (document.visibilityState === 'visible') loadFeeds({ silent: true });
+    }, 4000);
+
+    // Heavier aggregate panels every 10 seconds.
+    setInterval(() => {
+      if (document.visibilityState === 'visible') loadCore({ silent: true });
     }, 10000);
 
+    // NFT index every 60 seconds (metadata is cached separately).
     setInterval(() => {
       if (document.visibilityState === 'visible') loadNFT({ silent: true });
     }, 60000);
+
+    setInterval(updateSyncAge, 1000);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      loadTick();
+      loadFeeds({ silent: true });
+      updateSyncAge();
+    });
   }
 
   function init() {
@@ -1865,7 +2250,15 @@
     renderTick();
     loadCore();
     loadFeeds();
-    loadNFT({ silent: true });
+    loadNFT({ silent: true }).then(() => {
+      if (state.galleryAutoLoaded) return;
+      state.galleryAutoLoaded = true;
+      const seed = seedWalletAddress();
+      if (!seed) return;
+      const input = $('#wallet-nft-input');
+      if (input && !input.value) input.value = seed;
+      loadWalletGallery(seed, { auto: true });
+    });
     startTimers();
   }
 

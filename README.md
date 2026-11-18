@@ -1,33 +1,42 @@
-# Retium Live — Network Dashboard
+# RELIVE — Retium Network Dashboard
 
-A complete, real-time dashboard for the [Retium](https://retium.net) network. Every number on the page is pulled live from Retium's public APIs — no hardcoded chain stats, no API keys, no backend.
+A real-time, brand-forward dashboard for the [Retium](https://retium.net) network. Every number, feed and NFT artwork is pulled live from Retium's public APIs — no hardcoded chain stats, no API keys, no backend.
 
-![Retium Live desktop preview](docs/preview.png)
+![RELIVE desktop preview](docs/preview.png)
 
 <p align="center">
-  <img src="docs/mobile.png" alt="Retium Live on mobile" width="320" />
+  <img src="docs/mobile.png" alt="RELIVE on mobile" width="320" />
 </p>
+
+## Live, by default
+
+- **Tick + RPC latency** refresh every **3 seconds**.
+- **Transaction and block feeds** refresh every **4 seconds**, with new rows highlighted as they land.
+- **Aggregate panels** (stats, staking, economy, fees) refresh every **10 seconds**.
+- **NFT index** refreshes every **60 seconds**; metadata and artwork are cached per token.
+- The footer shows the exact time of the last sync and how many seconds ago it happened.
+- Pauses automatically while the tab is hidden; catches up when you return.
 
 ## What it shows
 
-- **Network activity** — total transactions, transfers, contract calls, contract deploys, stake/unstake operations, validator registry actions, safehouse operations, multisig actions and API-key operations, all broken down by share of the ledger.
-- **Transaction volume** — histogram for 24 hours, 7 days or 30 days with in-range totals, per-bucket averages and the busiest bucket.
+- **Network activity** — total transactions, transfers, contract calls, contract deploys, stake/unstake operations, validator registry actions, safehouse operations, multisig actions and API-key operations, with each type's share of the ledger.
+- **Transaction volume** — histogram for 24 hours, 7 days or 30 days, with in-range totals, per-bucket averages and the busiest bucket.
 - **Network health** — keepers, suits, workers and RPC nodes online, plus active/new wallet counts over 24h, 7d and 30d.
-- **Fee flow** — where every RTM of gas goes: collected, burned, workers, foundation, treasury, suits and keepers.
-- **NFT studio** — tracks RCP NFT collections, indexes mint/transfer/burn events, renders collection supply, and looks up any wallet's NFT gallery. You can add any collection by contract id.
+- **Fee flow** — collected, burned, workers, foundation, treasury, suits and keepers.
+- **NFT studio** — tracked RCP collections with **cover artwork**, per-token metadata, mint/transfer/burn events with thumbnails, wallet gallery with full artwork, and a collection tracker. Artwork is resolved through IPFS metadata and rendered as optimized thumbnails.
 - **Staking** — stake vs. unstake volume, validator registry activity, node operators and net staking direction.
-- **Economy** — RTD supply, reserves, customers and the safehouse (mint / redeem / lock) operations.
-- **Explorer** — look up a transaction, block, wallet or contract id using the network's own lookup endpoint.
-- **Live ledger** — streaming transaction feed with type filters, finalized block feed and block/transaction detail views.
+- **Economy** — RTD supply, reserves, customers and safehouse mint/redeem/lock operations.
+- **Explorer** — transactions, blocks, wallets and contracts through the network's lookup endpoint.
+- **Live ledger** — streaming transaction feed with type filters and a finalized block feed.
 
 ## Data sources
 
-All data is fetched client-side, directly from Retium's public endpoints. Both APIs send `Access-Control-Allow-Origin: *`, so the static site works from any origin, including GitHub Pages.
+All data is fetched client-side from Retium's public endpoints (both send `Access-Control-Allow-Origin: *`).
 
 | Source | Used for |
 | --- | --- |
-| `https://rpc.retium.org/api/stats` | ledger totals, transaction type breakdown, blocks, wallet windows, fee flow |
-| `https://rpc.retium.org/api/tick/current` | current tick and RPC latency |
+| `https://rpc.retium.org/api/stats` | ledger totals, transaction types, blocks, wallet windows, fee flow |
+| `https://rpc.retium.org/api/tick/current` | current tick, blocks in mesh, RPC latency |
 | `https://rpc.retium.org/api/ticks/list` | recent tick history |
 | `https://rpc.retium.org/api/transactions` | live transaction feed and filters |
 | `https://rpc.retium.org/api/transactions/histogram` | transaction volume chart |
@@ -41,39 +50,31 @@ All data is fetched client-side, directly from Retium's public endpoints. Both A
 | `https://rpc.retium.org/api/block/{id}` | block detail |
 | `https://rpc.retium.org/api/contract/{id}` | contract detail |
 | `https://rpc.retium.org/api/contract/{id}/events` | NFT mint / transfer / burn events |
-| `https://rpc.retium.org/api/contract/{id}/query` | NFT `total_supply` |
+| `https://rpc.retium.org/api/contract/{id}/query` | NFT `total_supply` and `token_uri` metadata |
 | `https://rpc.retium.org/api/safehouse` | RTD mint / redeem / lock operations |
-| `https://rpc.retium.org/api/lookup/{query}` | explorer auto-detection of ids |
+| `https://rpc.retium.org/api/lookup/{query}` | explorer auto-detection |
 | `https://api.retium.money/api/summary` | RTD supply, reserves and customers |
 
-The RPC response time shown in the hero is measured in the browser, not reported by the API.
+NFT artwork: `token_uri` points to IPFS metadata (name, image, attributes). The site fetches that metadata through public IPFS gateways and loads images via an image-optimization proxy, with direct-gateway fallbacks. Metadata is cached in `localStorage` (`retium-live.nftmeta.v1`, 7-day TTL).
 
-### About NFT totals
+## NFT totals — honest caveat
 
-Retium's public API exposes NFT data **per wallet** and **per contract** — there is no global "all NFTs on the network" counter. To stay honest instead of inventing a number, the NFT studio:
-
-1. Indexes a list of tracked RCP NFT contracts (one collection is seeded).
-2. Queries each contract's `total_supply` and event log.
-3. Sums mint, transfer and burn events across tracked contracts.
-
-The UI labels this as **Nft supply indexed** / **across tracked contracts** so it is never mistaken for a network-wide total. Add more collections with the form in the NFT section to widen the index.
+Retium's public API exposes NFTs **per wallet** and **per contract**; there is no global network NFT counter. Instead of inventing a number, RELIVE indexes a list of tracked RCP contracts (two are seeded), sums their `total_supply`, and counts their on-chain events. The UI labels this as **across tracked contracts**. Add more collections with the form in the NFT section to widen the index.
 
 ## Tech
 
 - Plain HTML, CSS and JavaScript — no framework, no bundler, no build step.
-- Single-page layout with hash navigation, reveal-on-scroll animations and a canvas rain effect that respects `prefers-reduced-motion`.
-- Responsive from small phones to wide desktops.
-- Uses `localStorage` only to remember your tracked collections and chart range. No cookies, no analytics, no tracking.
+- Orange/green web3 visual system with a live particle-mesh hero, glass panels and gradient data accents.
+- Responsive from small phones to wide desktops; honors `prefers-reduced-motion`.
+- `localStorage` is used only for tracked collections, chart range and NFT metadata cache. No cookies, no analytics, no tracking.
 
 ## Run locally
 
-Because the site is fully static, any file server works. Opening `index.html` directly from disk usually fails (browsers block `fetch` from `file://`), so serve the folder:
+Serve the folder with any static server (opening `index.html` from disk blocks `fetch`):
 
 ```bash
-# Python
 python -m http.server 8000
-
-# or Node
+# or
 npx serve .
 ```
 
@@ -81,39 +82,32 @@ Then open <http://localhost:8000>.
 
 ## Deploy to GitHub Pages
 
-A workflow is included at `.github/workflows/deploy.yml`. It publishes the repository root on every push to `main`.
+`.github/workflows/deploy.yml` publishes the repository root on every push to `main`.
 
-1. Create a repository on GitHub.
-2. Push this folder:
+```bash
+git init
+git add .
+git commit -m "RELIVE dashboard"
+git branch -M main
+git remote add origin https://github.com/<your-user>/<your-repo>.git
+git push -u origin main
+```
 
-   ```bash
-   git init
-   git add .
-   git commit -m "Retium Live dashboard"
-   git branch -M main
-   git remote add origin https://github.com/<your-user>/<your-repo>.git
-   git push -u origin main
-   ```
-
-3. On GitHub, open **Settings → Pages** and set **Source** to **GitHub Actions** (the workflow uses `configure-pages` / `deploy-pages`, so no branch selection is needed).
-4. The site deploys to `https://<your-user>.github.io/<your-repo>/`.
-
-The `.nojekyll` file is included so GitHub Pages serves the static assets as-is.
+Then on GitHub: **Settings → Pages → Source: GitHub Actions**. The site appears at `https://<your-user>.github.io/<your-repo>/`. `.nojekyll` is included.
 
 ## Project structure
 
 ```
 .
-├── index.html               # page structure and section copy
+├── index.html               # page structure and copy
 ├── assets/
-│   ├── styles.css           # design system, layout, responsive rules, animations
-│   ├── app.js               # API layer, renderers, NFT indexer, explorer, retries
+│   ├── styles.css           # visual system, layout, responsive rules
+│   ├── app.js               # API layer, renderers, NFT indexer, art hydration
+│   ├── relive-logo.png      # transparent wordmark used in header/footer
 │   └── favicon.svg
-├── docs/
-│   ├── preview.png          # desktop preview used in this README
-│   └── mobile.png           # mobile preview
+├── docs/                    # README previews
 ├── .github/workflows/
-│   └── deploy.yml           # GitHub Pages deployment
+│   └── deploy.yml
 ├── .nojekyll
 ├── LICENSE
 └── README.md
@@ -121,16 +115,16 @@ The `.nojekyll` file is included so GitHub Pages serves the static assets as-is.
 
 ## Customization
 
-- **Seed another NFT collection** — edit `DEFAULT_COLLECTION` in `assets/app.js`. You can also add collections at runtime in the NFT section; they persist in `localStorage` (`retium-live.collections.v1`).
-- **Refresh cadence** — see `startTimers()` in `assets/app.js`: core stats every 15s, feeds every 10s, NFT index every 60s.
-- **Endpoint or network changes** — `API` and `MONEY` constants sit at the top of `assets/app.js`.
-- **Look and feel** — colors, spacing and typography are CSS custom properties in `:root` in `assets/styles.css`.
+- **Seed collections / names** — edit `DEFAULT_COLLECTION`, `SECOND_COLLECTION` and `DEFAULT_NAMES` in `assets/app.js`.
+- **Refresh cadence** — `startTimers()`: tick 3s, feeds 4s, core 10s, NFT 60s.
+- **Endpoints** — `API`, `MONEY` and `IPFS_GATEWAYS` constants at the top of `assets/app.js`.
+- **Look and feel** — color tokens in `:root`, then the RELIVE identity layer at the bottom of `assets/styles.css`.
 
 ## Notes
 
-- This is an independent, community-built dashboard. It is not an official Retium product.
-- The Retium API is occasionally rate-limited or briefly unavailable. The UI degrades gracefully, keeps the last good data, shows retry buttons and backs off automatically.
-- Figures such as wallet counts are derived from the API's rolling wallet windows when a top-level total is not published; the UI labels them accordingly.
+- Independent, community-built dashboard; not an official Retium product.
+- The Retium API is occasionally rate-limited. Panels keep the last good data, show retry buttons, and back off automatically.
+- Wallet counts are derived from the API's rolling wallet windows when no top-level total is published.
 
 ## License
 

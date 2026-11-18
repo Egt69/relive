@@ -23,3 +23,6 @@ yarn.lock
 # Local environment / secrets
 .env
 .env.*
+
+# Source artwork supplied locally
+ReLIVE Futuristic Explorer Logo.png

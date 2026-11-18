@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Retium Live — a complete real-time dashboard for the Retium network: transactions, transfers, contract deployments, NFT activity, staking, validators and the RTM/RTD economy." />
+  <meta name="description" content="RELIVE — a real-time dashboard for the Retium network: transactions, transfers, contract deployments, NFT collections and artwork, staking, validators and the RTM/RTD economy." />
   <meta name="theme-color" content="#040805" />
-  <meta property="og:title" content="Retium Live — Network Dashboard" />
-  <meta property="og:description" content="Live on-chain data for the Retium network. Transactions, contracts, NFTs, staking and the RTM/RTD economy." />
+  <meta property="og:title" content="RELIVE — Retium Network Dashboard" />
+  <meta property="og:description" content="RELIVE is a real-time Retium network dashboard: transactions, contracts, NFTs, staking and the RTM/RTD economy, live from the public API." />
   <meta property="og:type" content="website" />
-  <title>Retium Live — Network Dashboard</title>
+  <title>RELIVE — Retium Network Dashboard</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://rpc.retium.org" crossorigin />
   <link rel="preconnect" href="https://api.retium.money" crossorigin />
@@ -20,12 +20,8 @@
 
   <header class="site-header" id="site-header">
     <div class="header-inner">
-      <a class="brand" href="#overview" aria-label="Retium Live — home">
-        <span class="brand-mark" aria-hidden="true">R</span>
-        <span class="brand-copy">
-          <strong>RETIUM</strong>
-          <small>LIVE EXPLORER</small>
-        </span>
+      <a class="brand" href="#overview" aria-label="RELIVE — Retium network dashboard">
+        <img class="brand-logo" src="assets/relive-logo.png" alt="RELIVE" width="150" height="20" />
       </a>
 
       <nav class="nav" id="nav" aria-label="Sections">
@@ -76,7 +72,7 @@
             </a>
             <a class="btn btn-ghost" href="#nft">Open NFT studio</a>
           </div>
-          <p class="hero-note">No API key required · auto-refreshes every 15 seconds</p>
+          <p class="hero-note">No API key required · live tick every 3s · feeds every 4s</p>
         </div>
 
         <div class="hero-status" aria-label="Network status">
@@ -525,9 +521,8 @@
   <footer class="site-footer">
     <div class="wrap footer-inner">
       <div class="footer-brand">
-        <a class="brand" href="#overview">
-          <span class="brand-mark" aria-hidden="true">R</span>
-          <span class="brand-copy"><strong>RETIUM</strong><small>LIVE EXPLORER</small></span>
+        <a class="brand" href="#overview" aria-label="RELIVE — Retium network dashboard">
+          <img class="brand-logo" src="assets/relive-logo.png" alt="RELIVE" width="168" height="23" />
         </a>
         <p>An independent, open-source dashboard for the Retium network. Data is read directly from the public API — no keys, no backend.</p>
       </div>
@@ -547,9 +542,9 @@
       </div>
     </div>
     <div class="wrap footer-bottom">
-      <span>© <span id="year">2026</span> Retium Live · MIT licensed</span>
-      <span>Last sync: <b id="last-sync">—</b></span>
-      <span class="footer-note">Not affiliated with Retium. Numbers are live and may lag the chain by a few seconds.</span>
+      <span>© <span id="year">2026</span> RELIVE · MIT licensed</span>
+      <span>Last sync: <b id="last-sync">—</b> <span id="sync-age"></span></span>
+      <span class="footer-note">Independent dashboard, not affiliated with Retium. Data streams from the public API and may lag the chain by a few seconds.</span>
     </div>
   </footer>
 
