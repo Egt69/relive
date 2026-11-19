@@ -89,6 +89,11 @@
     return `${Math.floor(seconds / 86400)}d`;
   };
 
+  const agoLabel = (ts) => {
+    const value = timeAgo(ts);
+    return value === 'now' ? 'now' : value === '—' ? '—' : `${value} ago`;
+  };
+
   async function api(path, timeout = 15000) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeout);
@@ -478,7 +483,7 @@
           <b>${esc(actionLabel(tx.action))}</b>
           <span>${esc(short(tx.sender, 10, 6))} → ${esc(short(tx.recipient, 10, 6))}</span>
         </div>
-        <div class="wire-value">${value}<small>${esc(timeAgo(tx.timestamp))} ago</small></div>
+        <div class="wire-value">${value}<small>${esc(agoLabel(tx.timestamp))}</small></div>
       </div>`;
     }).join('');
   }
@@ -1072,11 +1077,11 @@
           const isMint = type.includes('transfer') && String(event.data || '').includes('"from":"0x0"');
           const label = isMint ? 'mint' : type;
           const cls = label.includes('mint') ? 'mint' : label.includes('burn') ? 'burn' : label.includes('transfer') ? 'transfer' : '';
-          const when = timeAgo(event.timestamp);
+          const when = agoLabel(event.timestamp);
           return `<div class="event-row">
             <span class="ev-badge ${cls}">${esc(label)}</span>
             <span class="ev-text">${esc(eventSummary(event))}</span>
-            <span class="ev-time">${esc(when === 'now' ? 'just now' : `${when} ago`)}</span>
+            <span class="ev-time">${esc(when)}</span>
           </div>`;
         }).join('')}
       </div>` : ''}`;
