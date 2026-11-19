@@ -339,6 +339,61 @@
               <div class="empty-state">No wallet loaded yet.</div>
             </div>
           </article>
+
+          <!-- tools -->
+          <article class="panel col-12" id="tools">
+            <div class="panel-head">
+              <div>
+                <h3>NFT &amp; token tools</h3>
+                <p class="panel-sub">Wallet collections, contract checks, and token supply with on-chain liquidity</p>
+              </div>
+              <div class="segmented" id="tool-tabs" role="tablist" aria-label="Tools">
+                <button type="button" role="tab" data-tool="wallet" class="is-active" aria-selected="true">Wallet NFTs</button>
+                <button type="button" role="tab" data-tool="contract" aria-selected="false">NFT contract</button>
+                <button type="button" role="tab" data-tool="token" aria-selected="false">Token</button>
+              </div>
+            </div>
+
+            <section class="tool-pane" data-pane="wallet">
+              <form class="inline-form" id="wallet-form" autocomplete="off">
+                <label class="sr-only" for="wallet-input">Wallet address</label>
+                <input id="wallet-input" name="wallet" placeholder="rete…" spellcheck="false" />
+                <button class="btn btn-primary btn-sm" type="submit">Look up wallet</button>
+              </form>
+              <p class="form-hint" id="wallet-hint">Any Retium wallet. Collections, counts and artwork are read from the public NFT index.</p>
+              <div class="tool-result" id="wallet-result">
+                <div class="empty-state">Enter a wallet address to see its NFT collections.</div>
+              </div>
+            </section>
+
+            <section class="tool-pane" data-pane="contract" hidden>
+              <form class="inline-form" id="contract-form" autocomplete="off">
+                <label class="sr-only" for="contract-input">Contract id</label>
+                <input id="contract-input" name="contract" placeholder="64-hex contract id" spellcheck="false" />
+                <button class="btn btn-primary btn-sm" type="submit">Check contract</button>
+              </form>
+              <p class="form-hint" id="contract-hint">Paste a 64-hex contract id. Declared type, supply, events and art come straight from the chain.</p>
+              <div class="tool-result" id="contract-result">
+                <div class="empty-state">Check any RCP contract: declared type, capabilities, supply and recent events.</div>
+              </div>
+            </section>
+
+            <section class="tool-pane" data-pane="token" hidden>
+              <form class="inline-form" id="token-form" autocomplete="off">
+                <label class="sr-only" for="token-input">Token contract id</label>
+                <input id="token-input" name="token" placeholder="Token contract id (64 hex)" spellcheck="false" />
+                <button class="btn btn-primary btn-sm" type="submit">Open token</button>
+              </form>
+              <p class="form-hint" id="token-hint">Name, supply and RTM liquidity read from the DexCore pools.</p>
+              <div class="tool-result" id="token-result">
+                <div class="empty-state">Open a token to see its supply and liquidity.</div>
+              </div>
+              <div class="pool-block">
+                <div class="mini-title split-title"><span>Top RTM pools</span><span id="pool-count">—</span></div>
+                <div class="pool-list" id="pool-list"><div class="empty-state">Open this tab to load pools.</div></div>
+              </div>
+            </section>
+          </article>
         </div>
       </div>
     </section>

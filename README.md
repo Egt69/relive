@@ -62,6 +62,16 @@ NFT artwork: `token_uri` points to IPFS metadata (name, image, attributes). The 
 
 `ringkasan/index.html` is a separate, explorer-free view of the same live data: an editorial one-pager with a live readout, lifetime totals strip, ledger composition donut, momentum chart, validator and wallet panels, staking split, RTM/RTD economy, a live wire of new actions and NFT collections with real artwork. Open it from the **Brief** item in the explorer header or at `/ringkasan/index.html` on GitHub Pages.
 
+The bottom of the brief carries three live tools:
+
+| Tool | What it reads |
+| --- | --- |
+| **Wallet NFTs** | `/wallet/{address}/nfts` — every piece the wallet holds, grouped by collection, with real names and artwork |
+| **NFT contract** | `/contract/{id}` plus `/events` and `total_supply` — declared type, version, capabilities, supply, mint/transfer/burn counts and recent events |
+| **Token** | `status`/`name`/`total_supply` on the token contract, merged with DexCore `list_pools` / `list_v2` for spot price, RTM liquidity and reserves |
+
+Every field comes from the chain at request time: no curated token lists, no cached prices. Pool rows are clickable and open the matching token page.
+
 ## NFT totals — honest caveat
 
 Retium's public API exposes NFTs **per wallet** and **per contract**; there is no global network NFT counter. Instead of inventing a number, RELIVE scans recent transactions for NFT contract calls, verifies each contract via `/contract/{id}`, and indexes the collections it finds. The UI labels totals as **across tracked contracts**. You can add any contract id yourself with the form in the NFT section.

@@ -79,7 +79,8 @@
     return part ? `${whole}.${part}` : whole;
   };
   const timeAgo = (ts) => {
-    const seconds = Math.floor((Date.now() - Number(ts) * 1000) / 1000);
+    const raw = Number(ts);
+    const seconds = Math.floor((Date.now() - (raw > 1e12 ? raw : raw * 1000)) / 1000);
     if (!Number.isFinite(seconds)) return '—';
     if (seconds < 5) return 'now';
     if (seconds < 60) return `${seconds}s`;
@@ -764,7 +765,14 @@
 
   function imageFallbacks(root) {
     $$('img', root).forEach((img) => {
-      img.addEventListener('load', () => img.classList.add('is-loaded'), { once: true });
+      const markLoaded = () => {
+        img.classList.add('is-loaded');
+        const card = img.closest('.nft-card');
+        if (card) card.classList.add('has-art');
+        const avatar = img.closest('.tool-avatar');
+        if (avatar) avatar.classList.add('has-art');
+      };
+      img.addEventListener('load', markLoaded, { once: true });
       img.addEventListener('error', () => {
         if (img.dataset.retried) return;
         img.dataset.retried = '1';
@@ -772,11 +780,456 @@
           ? img.src.replace('ipfs.filebase.io', 'gateway.pinata.cloud')
           : img.src.replace('gateway.pinata.cloud', 'ipfs.filebase.io');
       }, { once: true });
-      if (img.complete && img.naturalWidth > 0) img.classList.add('is-loaded');
+      if (img.complete && img.naturalWidth > 0) markLoaded();
     });
   }
 
-  /* ---------------- wiring ---------------- */
+  /* ---------------- tools: shared helpers ---------------- */
+  const DEX = '59bf79b965fc9ae4f6854ca766027d0275e76bc56f060a377ec49106baf54f61';
+  const poolCache = { at: 0, map: null, list: [] };
+  const symbolCache = new Map();
+
+  const isContractId = (v) => /^[0-9a-f]{64}$/i.test(String(v || '').trim());
+  const isWalletId = (v) => /^rete[a-z0-9]{20,}$/i.test(String(v || '').trim());
+
+  function parseJson(value) {
+    if (typeof value !== 'string') return value ?? null;
+    try { return JSON.parse(value); } catch { return null; }
+  }
+
+  function traitsOf(meta) {
+    const traits = meta?.rcp_metadata?.traits || [];
+    const symbol = String(traits.find((t) => t.startsWith('symbol:')) || '').slice(7).trim();
+    const rawDecimals = String(traits.find((t) => t.startsWith('decimals:')) || '').slice(9);
+    const decimals = /^\d{1,2}$/.test(rawDecimals) ? Number(rawDecimals) : 18;
+    return {
+      traits,
+      symbol: /^[A-Za-z0-9._-]{1,16}$/.test(symbol) ? symbol : null,
+      decimals
+    };
+  }
+
+  function bigToNumber(raw, decimals = 18) {
+    try {
+      const big = BigInt(String(raw));
+      const base = 10n ** BigInt(decimals);
+      return Number(big / base) + Number(big % base) / Number(base);
+    } catch {
+      return NaN;
+    }
+  }
+
+  function fmtAmount(raw, decimals = 18, digits = 2) {
+    const n = bigToNumber(raw, decimals);
+    if (!Number.isFinite(n)) return '—';
+    if (n === 0) return '0';
+    if (n < 0.000001) return '<0.000001';
+    return n.toLocaleString('en-US', { maximumFractionDigits: digits });
+  }
+
+  async function contractQuery(contract, method, args = '') {
+    try {
+      const res = await api(`/contract/${contract}/query?method=${encodeURIComponent(method)}&args=${encodeURIComponent(args)}`, 12000);
+      if (res?.ok === false) return null;
+      return res?.output ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function tokenBasics(id) {
+    const key = String(id).toLowerCase();
+    if (symbolCache.has(key)) return symbolCache.get(key);
+    const promise = (async () => {
+      const meta = await api(`/contract/${key}`, 12000).catch(() => null);
+      const info = traitsOf(meta);
+      return {
+        id: key,
+        symbol: info.symbol,
+        decimals: info.decimals,
+        type: meta?.rcp_metadata?.rcp_type || 'Token',
+        ok: Boolean(meta?.rcp_metadata)
+      };
+    })();
+    symbolCache.set(key, promise);
+    return promise;
+  }
+
+  async function loadPools(force = false) {
+    if (!force && poolCache.map && Date.now() - poolCache.at < 90000) return poolCache;
+    const [v1, v2] = await Promise.allSettled([
+      contractQuery(DEX, 'list_pools'),
+      contractQuery(DEX, 'list_v2')
+    ]);
+    const map = new Map();
+    (parseJson(v1.value)?.pools || []).forEach((pool) => {
+      const id = String(pool?.token_b || '').toLowerCase();
+      if (id) map.set(id, { ...pool, kind: 'v1' });
+    });
+    (parseJson(v2.value)?.pools || []).forEach((pool) => {
+      const id = String(pool?.token || '').toLowerCase();
+      if (id && !map.has(id)) map.set(id, { ...pool, kind: 'v2' });
+    });
+    poolCache.at = Date.now();
+    poolCache.map = map;
+    poolCache.list = [...map.values()];
+    return poolCache;
+  }
+
+  function poolPrice(pool, decimals = 18) {
+    const rtm = bigToNumber(pool?.reserve_rtm, 18);
+    const token = bigToNumber(pool?.reserve_token, decimals);
+    if (!Number.isFinite(rtm) || !Number.isFinite(token) || token <= 0) return NaN;
+    return rtm / token;
+  }
+
+  async function renderPools() {
+    const host = $('#pool-list');
+    const pools = [...(poolCache.list || [])].sort((a, b) => Number(b.reserve_rtm || 0) - Number(a.reserve_rtm || 0));
+    $('#pool-count').textContent = pools.length ? `${int(pools.length)} pools · DexCore` : '—';
+    if (!pools.length) {
+      host.innerHTML = '<div class="empty-state">DexCore returned no pools right now.</div>';
+      return;
+    }
+
+    const top = pools.slice(0, 8);
+    host.innerHTML = top.map((pool) => {
+      const id = String(pool.token_b || pool.token || '');
+      return `<button type="button" class="pool-row" data-pool="${esc(id)}">
+        <span><b data-sym="${esc(id)}">${esc(short(id, 8, 4))}</b><small>${esc(short(id, 14, 8))}</small></span>
+        <span class="pool-col" data-price="${esc(id)}">—<span>RTM / token</span></span>
+        <span class="pool-col" data-liq="${esc(id)}">${esc(fmtAmount(pool.reserve_rtm, 18, 0))}<span>RTM liq</span></span>
+      </button>`;
+    }).join('');
+
+    await Promise.all(top.map(async (pool) => {
+      const id = String(pool.token_b || pool.token || '');
+      const info = await tokenBasics(id);
+      const row = host.querySelector(`[data-pool="${id}"]`);
+      if (!row) return;
+      if (info.symbol) {
+        const sym = row.querySelector(`[data-sym="${id}"]`);
+        if (sym) sym.textContent = info.symbol;
+      }
+      const price = poolPrice(pool, info.decimals);
+      if (Number.isFinite(price)) {
+        const el = row.querySelector(`[data-price="${id}"]`);
+        if (el && el.firstChild) el.firstChild.textContent = amount(price, 6);
+      }
+    }));
+  }
+
+  /* ---------------- tools: wallet NFTs ---------------- */
+  async function openWallet(address) {
+    const host = $('#wallet-result');
+    const wallet = String(address || '').trim();
+    if (!isWalletId(wallet)) {
+      host.innerHTML = '<div class="empty-state">That does not look like a Retium wallet (expected <code>rete…</code>).</div>';
+      return;
+    }
+
+    host.innerHTML = '<div class="empty-state">Reading this wallet’s NFT index…</div>';
+
+    const data = await api(`/wallet/${encodeURIComponent(wallet)}/nfts?limit=48&offset=0`).catch(() => null);
+    if (!data) {
+      host.innerHTML = '<div class="empty-state">Could not read that wallet right now.</div>';
+      return;
+    }
+
+    const nfts = Array.isArray(data.nfts) ? data.nfts : [];
+    if (!nfts.length) {
+      host.innerHTML = `<div class="empty-state">No NFTs found for ${esc(short(wallet, 12, 6))}.</div>`;
+      return;
+    }
+
+    const groups = new Map();
+    nfts.forEach((nft) => {
+      const id = String(nft.contract_id).toLowerCase();
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(nft.token_id);
+    });
+
+    const chips = [...groups.entries()].map(([id, tokens]) =>
+      `<span data-col-chip="${esc(id)}">Collection ${esc(short(id, 6, 4))} · <b>${int(tokens.length)}</b></span>`
+    ).join('');
+
+    host.innerHTML = `
+      <div class="tool-head">
+        <div>
+          <div class="tool-title">${int(data.total_count ?? nfts.length)} pieces · ${int(groups.size)} collections</div>
+          <div class="tool-id">${esc(wallet)}</div>
+        </div>
+      </div>
+      <div class="ledger-chips" style="margin-top:14px">${chips}</div>
+      <div class="nft-gallery" style="margin-top:16px">${nfts.map((nft, i) => `<article class="nft-card">
+        <div class="nft-thumb"><span class="nft-fallback">#${esc(nft.token_id)}</span><img alt="" decoding="async" data-wallet-img="${i}" /></div>
+        <div class="nft-meta">
+          <b class="nft-name" data-wallet-name="${i}">Token #${esc(nft.token_id)}</b>
+          <span class="nft-contract">${esc(short(nft.contract_id, 10, 6))}</span>
+        </div>
+      </article>`).join('')}</div>`;
+
+    imageFallbacks(host);
+
+    await Promise.all([...groups.entries()].map(async ([id, tokens]) => {
+      const meta = await tokenMeta(id, tokens[0]);
+      const derived = meta?.name ? meta.name.replace(/\s*#?\d+\s*$/, '').trim() : '';
+      const chip = host.querySelector(`[data-col-chip="${id}"]`);
+      if (chip && derived && !/^\d+$/.test(derived)) chip.innerHTML = `${esc(derived)} · <b>${int(tokens.length)}</b>`;
+    }));
+
+    await Promise.all(nfts.map(async (nft, i) => {
+      const meta = await tokenMeta(String(nft.contract_id).toLowerCase(), nft.token_id);
+      if (!meta) return;
+      const name = host.querySelector(`[data-wallet-name="${i}"]`);
+      const img = host.querySelector(`[data-wallet-img="${i}"]`);
+      if (name && meta.name && !/^\d+$/.test(meta.name.trim())) name.textContent = meta.name;
+      if (img && meta.image) img.src = meta.image;
+    }));
+  }
+
+  /* ---------------- tools: contract check ---------------- */
+  async function checkContract(id) {
+    const host = $('#contract-result');
+    const clean = String(id || '').trim().toLowerCase();
+    if (!isContractId(clean)) {
+      host.innerHTML = '<div class="empty-state">Enter the full 64-hex contract id.</div>';
+      return;
+    }
+
+    host.innerHTML = '<div class="empty-state">Reading contract…</div>';
+
+    const meta = await api(`/contract/${clean}`, 12000).catch(() => null);
+    if (!meta?.rcp_metadata) {
+      host.innerHTML = '<div class="empty-state">No RCP contract found for that id.</div>';
+      return;
+    }
+
+    const rcp = meta.rcp_metadata;
+    const traits = rcp.traits || [];
+    const caps = rcp.capabilities || [];
+    const isNft = caps.includes('token_uri') || caps.includes('owner_of') || /NFT/i.test(String(rcp.rcp_type || ''));
+    const isFungible = traits.includes('fungible');
+
+    const [supplyRaw, eventsRes] = isNft
+      ? await Promise.all([
+        contractQuery(clean, 'total_supply'),
+        api(`/contract/${clean}/events`, 15000).catch(() => null)
+      ])
+      : [null, null];
+
+    const events = eventsRes?.events || [];
+    const count = (label) => events.filter((e) => String(e.event_type || '').toLowerCase() === label).length;
+    const mints = count('mint') + events.filter((e) => String(e.data || '').includes('"from":"0x0"')).length;
+    const transfers = count('transfer');
+    const burns = count('burn');
+
+    let cover = '';
+    let derived = '';
+    if (isNft) {
+      const mintEvent = events.find((e) => String(e.data || '').includes('"from":"0x0"'));
+      const tokenId = mintEvent ? (parseJson(mintEvent.data)?.id ?? parseJson(mintEvent.data)?.token_id) : null;
+      if (tokenId !== null && tokenId !== undefined) {
+        const tm = await tokenMeta(clean, tokenId);
+        cover = tm?.image || '';
+        derived = tm?.name ? tm.name.replace(/\s*#?\d+\s*$/, '').trim() : '';
+      }
+    }
+
+    const name = derived || `${rcp.rcp_type || 'Contract'} ${short(clean, 6, 4)}`;
+    const recent = events.slice(0, 6);
+    const deployer = meta.deployer ? short(meta.deployer, 10, 6) : '—';
+    const kindLabel = isNft ? 'NFT' : isFungible ? 'fungible token' : 'contract';
+    const typeLabel = String(rcp.rcp_type || '').toLowerCase() === kindLabel.toLowerCase().replace(' token', '')
+      ? `${kindLabel} · ${rcp.version || '—'}`
+      : `${rcp.rcp_type || 'Contract'} · ${kindLabel} · ${rcp.version || '—'}`;
+
+    host.innerHTML = `
+      <div class="tool-head">
+        <div class="tool-avatar"><span>${isNft ? 'NFT' : isFungible ? 'FT' : 'RCP'}</span>${cover ? `<img alt="" decoding="async" data-contract-art src="${esc(cover)}" />` : ''}</div>
+        <div>
+          <div class="tool-title">${esc(name)}</div>
+          <div class="tool-type">${esc(typeLabel)}</div>
+          <div class="tool-id">${esc(clean)}</div>
+        </div>
+        ${isFungible ? `<button type="button" class="btn btn-ghost btn-sm" data-open-token="${esc(clean)}" style="margin-left:auto">Open token page</button>` : ''}
+      </div>
+      <div class="fee-grid tool-section">
+        <div class="fee-card"><span>${isNft ? 'NFT supply' : 'Status'}</span><strong>${isNft ? esc(fmtAmount(supplyRaw, 0, 0)) : esc(meta.status || 'deployed')}</strong></div>
+        <div class="fee-card"><span>Mints (last 100)</span><strong>${isNft ? int(mints) : '—'}</strong></div>
+        <div class="fee-card"><span>Transfers (last 100)</span><strong>${isNft ? int(transfers) : '—'}</strong></div>
+        <div class="fee-card"><span>Burns (last 100)</span><strong>${isNft ? int(burns) : '—'}</strong></div>
+        <div class="fee-card"><span>Deployed at tick</span><strong>${esc(meta.deployed_at_tick ?? '—')}</strong></div>
+        <div class="fee-card"><span>Capabilities</span><strong>${int(caps.length)}</strong></div>
+      </div>
+      <p class="tool-note">Deployer <b>${esc(deployer)}</b> · traits: ${esc(traits.join(', ') || 'none')}</p>
+      ${isNft && !cover ? '<p class="tool-note warn">No artwork resolved yet — this contract may not expose <code>token_uri</code> metadata.</p>' : ''}
+      ${isFungible ? '' : isNft ? '' : '<p class="tool-note warn">This looks like a non-NFT contract. Use the Token tab for fungible tokens.</p>'}
+      ${recent.length ? `<div class="tool-section">
+        <div class="mini-title">Recent events</div>
+        ${recent.map((event) => {
+          const type = String(event.event_type || 'event').toLowerCase();
+          const isMint = type.includes('transfer') && String(event.data || '').includes('"from":"0x0"');
+          const label = isMint ? 'mint' : type;
+          const cls = label.includes('mint') ? 'mint' : label.includes('burn') ? 'burn' : label.includes('transfer') ? 'transfer' : '';
+          const when = timeAgo(event.timestamp);
+          return `<div class="event-row">
+            <span class="ev-badge ${cls}">${esc(label)}</span>
+            <span class="ev-text">${esc(eventSummary(event))}</span>
+            <span class="ev-time">${esc(when === 'now' ? 'just now' : `${when} ago`)}</span>
+          </div>`;
+        }).join('')}
+      </div>` : ''}`;
+
+    imageFallbacks(host);
+  }
+
+  /* ---------------- tools: token page ---------------- */
+  async function openToken(id) {
+    const host = $('#token-result');
+    const clean = String(id || '').trim().toLowerCase();
+    if (!isContractId(clean)) {
+      host.innerHTML = '<div class="empty-state">Enter the full 64-hex token contract id.</div>';
+      return;
+    }
+
+    host.innerHTML = '<div class="empty-state">Reading token, supply and pools…</div>';
+
+    const [meta, statusRaw, nameRaw, pools] = await Promise.all([
+      api(`/contract/${clean}`, 12000).catch(() => null),
+      contractQuery(clean, 'status'),
+      contractQuery(clean, 'name'),
+      loadPools()
+    ]);
+
+    if (!meta?.rcp_metadata) {
+      host.innerHTML = '<div class="empty-state">No RCP contract found for that id.</div>';
+      return;
+    }
+
+    const info = traitsOf(meta);
+    const rcp = meta.rcp_metadata;
+    const isFungible = info.traits.includes('fungible');
+
+    let supplyRaw = parseJson(statusRaw)?.total_supply ?? null;
+    if (!supplyRaw) supplyRaw = await contractQuery(clean, 'total_supply');
+    const nameOutput = parseJson(nameRaw);
+    const name = typeof nameOutput === 'string' && nameOutput.trim() ? nameOutput.trim() : '';
+
+    const pool = pools.map.get(clean) || null;
+    const price = pool ? poolPrice(pool, info.decimals) : NaN;
+    const rtmLiquidity = pool ? bigToNumber(pool.reserve_rtm, 18) : NaN;
+    const tokenReserve = pool ? bigToNumber(pool.reserve_token, info.decimals) : NaN;
+
+    host.innerHTML = `
+      <div class="tool-head">
+        <div class="tool-avatar"><span>${esc((info.symbol || 'TOK').slice(0, 4))}</span></div>
+        <div>
+          <div class="token-sym">${esc(info.symbol || short(clean, 8, 4))}</div>
+          <div class="tool-title" style="font-size:14px;margin-top:4px">${esc(name || rcp.rcp_type || 'Token')}</div>
+          <div class="tool-type">${esc(rcp.rcp_type || 'Token')} · ${isFungible ? 'fungible' : 'no fungible trait'} · ${info.decimals} decimals · ${esc(rcp.version || '—')}</div>
+          <div class="tool-id">${esc(clean)}</div>
+        </div>
+        <span class="pill ${pool ? 'ok' : ''}" style="margin-left:auto">${pool ? `${pool.kind.toUpperCase()} pool` : 'no pool'}</span>
+      </div>
+      <div class="fee-grid tool-section">
+        <div class="fee-card"><span>Total supply</span><strong>${esc(fmtAmount(supplyRaw, info.decimals, 2))} ${esc(info.symbol || '')}</strong></div>
+        <div class="fee-card"><span>Price</span><strong>${Number.isFinite(price) ? `${amount(price, 6)} RTM` : '—'}</strong></div>
+        <div class="fee-card"><span>Liquidity</span><strong>${Number.isFinite(rtmLiquidity) ? `${amount(rtmLiquidity, 2)} RTM` : '—'}</strong></div>
+        <div class="fee-card"><span>Token reserve</span><strong>${Number.isFinite(tokenReserve) ? `${amount(tokenReserve, 2)} ${esc(info.symbol || '')}` : '—'}</strong></div>
+        <div class="fee-card"><span>LP supply</span><strong>${pool?.lp_supply ? fmtAmount(pool.lp_supply, 18, 2) : '—'}</strong></div>
+        <div class="fee-card"><span>Pool type</span><strong>${pool ? pool.kind.toUpperCase() : 'none'}</strong></div>
+      </div>
+      ${pool ? '' : '<p class="tool-note warn">No RTM pool on DexCore for this token, so price and liquidity cannot be derived on-chain.</p>'}
+      ${isFungible ? '' : '<p class="tool-note warn">This contract has no <code>fungible</code> trait — it may still hold a supply, but it is not a standard token.</p>'}
+      ${pool && Number.isFinite(rtmLiquidity) ? `<p class="tool-note">Pool value is ${amount(rtmLiquidity * 2, 2)} RTM counting both sides, at a spot price of ${amount(price, 6)} RTM per ${esc(info.symbol || 'token')}. Prices move with every swap.</p>` : ''}`;
+  }
+
+
+  function eventSummary(event) {
+    const data = parseJson(event.data) || {};
+    const tokenId = data.id ?? data.token_id;
+    const from = typeof data.from === 'string' ? data.from : '';
+    const to = typeof data.to === 'string' ? data.to : '';
+    const parts = [];
+    if (tokenId !== undefined && tokenId !== null && tokenId !== '') parts.push(`#${tokenId}`);
+    if (to) parts.push(`${from && from !== '0x0' ? short(from, 8, 4) : 'mint'} → ${short(to, 8, 4)}`);
+    else if (from) parts.push(short(from, 8, 4));
+    if (!parts.length) return String(event.data || '').replace(/[{}"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    return parts.join(' · ');
+  }
+
+  /* ---------------- tools wiring ---------------- */
+  const toolTabs = $('#tool-tabs');
+  const panes = $$('.tool-pane');
+  let poolsRequested = false;
+
+  function selectTool(name) {
+    if (!toolTabs) return;
+    $$('button[data-tool]', toolTabs).forEach((btn) => {
+      const active = btn.dataset.tool === name;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+    panes.forEach((pane) => { pane.hidden = pane.dataset.pane !== name; });
+
+    if (name === 'token' && !poolsRequested) {
+      poolsRequested = true;
+      $('#pool-list').innerHTML = '<div class="empty-state">Loading DexCore pools…</div>';
+      loadPools()
+        .then(renderPools)
+        .catch(() => {
+          $('#pool-count').textContent = '—';
+          $('#pool-list').innerHTML = '<div class="empty-state">Could not reach DexCore right now.</div>';
+        });
+    }
+
+    const input = name === 'wallet' ? $('#wallet-input') : name === 'contract' ? $('#contract-input') : $('#token-input');
+    if (input) input.focus({ preventScroll: true });
+  }
+
+  if (toolTabs) {
+    toolTabs.addEventListener('click', (event) => {
+      const btn = event.target.closest('button[data-tool]');
+      if (btn) selectTool(btn.dataset.tool);
+    });
+
+    $$('.tool-pane').forEach((pane) => {
+      pane.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const form = event.target;
+        if (!form.matches('form')) return;
+        if (form.id === 'wallet-form') {
+          const value = $('#wallet-input').value.trim();
+          $('#wallet-hint').textContent = 'Reading the public NFT index for this wallet…';
+          openWallet(value).finally(() => {
+            $('#wallet-hint').textContent = 'Any Retium wallet. Collections, counts and artwork are read from the public NFT index.';
+          });
+        } else if (form.id === 'contract-form') {
+          checkContract($('#contract-input').value);
+        } else if (form.id === 'token-form') {
+          openToken($('#token-input').value);
+        }
+      });
+    });
+
+    $('#tools').addEventListener('click', (event) => {
+      const poolRow = event.target.closest('.pool-row[data-pool]');
+      if (poolRow) {
+        selectTool('token');
+        $('#token-input').value = poolRow.dataset.pool;
+        openToken(poolRow.dataset.pool);
+        return;
+      }
+      const openTokenBtn = event.target.closest('[data-open-token]');
+      if (openTokenBtn) {
+        selectTool('token');
+        $('#token-input').value = openTokenBtn.dataset.openToken;
+        openToken(openTokenBtn.dataset.openToken);
+      }
+    });
+  }
+
   $('#ranges').addEventListener('click', (event) => {
     const button = event.target.closest('button[data-range]');
     if (!button) return;
