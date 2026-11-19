@@ -1,52 +1,64 @@
-/* RELIVE — network snapshot (separate view, same live data) */
+/* RELIVE — Network Brief
+   Same public API as the explorer, editorial one-page layout. */
 (() => {
   'use strict';
 
   const API = 'https://rpc.retium.org/api';
   const MONEY = 'https://api.retium.money/api/summary';
   const GATEWAYS = ['https://ipfs.filebase.io/ipfs/', 'https://gateway.pinata.cloud/ipfs/'];
-  const NFT_METHODS = new Set(['mint', 'batch_mint', 'batch_mint_base', 'drop_mint', 'drop_mint_pick', 'transfer', 'batch_transfer', 'burn', 'batch_burn', 'reveal', 'init_drop']);
+  const NFT_METHODS = new Set([
+    'mint', 'batch_mint', 'batch_mint_base', 'drop_mint', 'drop_mint_pick',
+    'transfer', 'batch_transfer', 'burn', 'batch_burn', 'reveal', 'init_drop'
+  ]);
 
   const TYPES = [
-    { key: 'transfer', label: 'Transfers', color: '#c8f169' },
-    { key: 'contract_call', label: 'Contract calls', color: '#54d6c6' },
-    { key: 'stake', label: 'Stake', color: '#f5d66b' },
-    { key: 'unstake', label: 'Unstake', color: '#f08fc0' },
-    { key: 'contract_deploy', label: 'Deploys', color: '#ff7a1a' },
-    { key: 'safehouse', label: 'Safehouse', color: '#6cb8ff' },
-    { key: 'validator', label: 'Validators', color: '#a78bfa' },
-    { key: 'api_key', label: 'API keys', color: '#9aa8b0' },
-    { key: 'multisig', label: 'Multisig', color: '#7dd3fc' }
+    { key: 'transfer', label: 'Transfers', color: '#ff7a1a' },
+    { key: 'contract_call', label: 'Contract calls', color: '#5b8def' },
+    { key: 'stake', label: 'Stake', color: '#3ecf6f' },
+    { key: 'unstake', label: 'Unstake', color: '#b07cf7' },
+    { key: 'contract_deploy', label: 'Deploys', color: '#e0b341' },
+    { key: 'safehouse', label: 'Safehouse', color: '#38bdf8' },
+    { key: 'validator', label: 'Validators', color: '#2e9e4f' },
+    { key: 'api_key', label: 'API keys', color: '#6e7781' },
+    { key: 'multisig', label: 'Multisig', color: '#94a3b8' }
   ];
 
-  const state = {
-    stats: null, tick: null, safehouse: null, summary: null,
-    histogram: null, transactions: [], range: '7d',
-    collections: [], nftBusy: false, lastSync: 0, lastTick: null
+  const ACTION_COLORS = {
+    transfer: '#ff7a1a',
+    call: '#5b8def',
+    contract_call: '#5b8def',
+    deploy: '#e0b341',
+    contract_deploy: '#e0b341',
+    stake: '#3ecf6f',
+    unstake: '#b07cf7',
+    safehouse: '#38bdf8',
+    validator: '#2e9e4f',
+    multisig: '#94a3b8'
   };
 
-  const $ = (s) => document.querySelector(s);
-  const $$ = (s) => Array.from(document.querySelectorAll(s));
-  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const int = (v) => (v === null || v === undefined || v === '' ? '—' : (Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-US') : String(v)));
-  const pct = (a, b) => (b > 0 ? ((Number(a) / Number(b)) * 100).toFixed(1) : '0.0');
-  const short = (v, h = 8, t = 5) => { const s = String(v || ''); return s.length > h + t + 3 ? `${s.slice(0, h)}…${s.slice(-t)}` : s; };
-  const timeAgo = (ts) => {
-    const s = Math.floor((Date.now() - Number(ts) * 1000) / 1000);
-    if (!Number.isFinite(s)) return '—';
-    if (s < 60) return `${Math.max(0, s)}s ago`;
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-    return `${Math.floor(s / 86400)}d ago`;
+  const state = {
+    stats: null,
+    tick: null,
+    safehouse: null,
+    summary: null,
+    histogram: null,
+    transactions: [],
+    range: '7d',
+    collections: [],
+    nftBusy: false,
+    nftTotal: null,
+    lastSync: 0,
+    latency: null
   };
-  const atomic = (value, decimals = 18, digits = 2) => {
-    const raw = String(value || '').trim();
-    if (!/^\d+$/.test(raw)) return '—';
-    const big = BigInt(raw), base = 10n ** BigInt(decimals);
-    const whole = (big / base).toLocaleString('en-US');
-    const frac = big % base;
-    const part = frac > 0n ? `.${frac.toString().padStart(decimals, '0').slice(0, digits).replace(/0+$/, '')}` : '';
-    return whole + (part === '.' ? '' : part);
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const int = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '—' : Number(v).toLocaleString('en-US'));
+  const pct = (a, b) => (Number(b) > 0 ? ((Number(a) / Number(b)) * 100).toFixed(1) : '0.0');
+  const short = (v, h = 9, t = 6) => {
+    const s = String(v || '');
+    return s.length > h + t + 3 ? `${s.slice(0, h)}…${s.slice(-t)}` : s;
   };
   const amount = (value, digits = 2) => {
     const n = Number(value);
@@ -54,6 +66,26 @@
     if (n === 0) return '0';
     if (n > 0 && n < 0.01) return '<0.01';
     return n.toLocaleString('en-US', { maximumFractionDigits: digits });
+  };
+  const atomic = (value, decimals = 18, digits = 2) => {
+    const raw = String(value || '').trim();
+    if (!/^\d+$/.test(raw)) return '—';
+    const big = BigInt(raw);
+    const base = 10n ** BigInt(decimals);
+    const whole = (big / base).toLocaleString('en-US');
+    const frac = big % base;
+    if (frac === 0n) return whole;
+    const part = frac.toString().padStart(decimals, '0').slice(0, digits).replace(/0+$/, '');
+    return part ? `${whole}.${part}` : whole;
+  };
+  const timeAgo = (ts) => {
+    const seconds = Math.floor((Date.now() - Number(ts) * 1000) / 1000);
+    if (!Number.isFinite(seconds)) return '—';
+    if (seconds < 5) return 'now';
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
   };
 
   async function api(path, timeout = 15000) {
@@ -63,34 +95,58 @@
       const res = await fetch(API + path, { signal: ctrl.signal, cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
-    } finally { clearTimeout(timer); }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  async function money() {
+  async function moneySummary() {
     const res = await fetch(MONEY, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
 
+  /* ---------------- sync clock ---------------- */
   function markSync() {
     state.lastSync = Date.now();
-    $('#sync-time').textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const clock = new Date().toLocaleTimeString('en-US', { hour12: false });
+    $('#sync-time').textContent = clock;
+    const last = $('#last-sync');
+    if (last) last.textContent = clock;
     updateAge();
   }
+
   function updateAge() {
     const el = $('#sync-age');
     if (!el || !state.lastSync) return;
-    const s = Math.floor((Date.now() - state.lastSync) / 1000);
-    el.textContent = s < 2 ? '· just now' : `· ${s}s ago`;
+    const seconds = Math.floor((Date.now() - state.lastSync) / 1000);
+    el.textContent = seconds < 2 ? ' · just now' : ` · ${seconds}s ago`;
+    if (seconds > 45) el.style.color = '#f0a15a';
+    else el.style.color = '';
+    const clock = $('#last-sync');
+    if (clock) clock.textContent = new Date(state.lastSync).toLocaleTimeString('en-US', { hour12: false });
   }
 
-  /* ---------------- core ---------------- */
+  /* ---------------- loaders ---------------- */
   async function loadCore() {
+    const tz = -new Date().getTimezoneOffset();
+    let latency = null;
+    const timedTick = (async () => {
+      const started = performance.now();
+      const data = await api('/tick/current');
+      latency = performance.now() - started;
+      return data;
+    })();
+
     const [stats, tick, safehouse, summary, histogram, tx] = await Promise.allSettled([
-      api('/stats'), api('/tick/current'), api('/safehouse'), money(),
-      api(`/transactions/histogram?range=${state.range}&tz=${-new Date().getTimezoneOffset()}`),
-      api('/transactions?limit=24&offset=0')
+      api('/stats'),
+      timedTick,
+      api('/safehouse'),
+      moneySummary(),
+      api(`/transactions/histogram?range=${state.range}&tz=${tz}`),
+      api('/transactions?limit=30&offset=0')
     ]);
+
     if (stats.status === 'fulfilled') state.stats = stats.value;
     if (tick.status === 'fulfilled') state.tick = tick.value;
     if (safehouse.status === 'fulfilled') state.safehouse = safehouse.value;
@@ -98,217 +154,366 @@
     if (histogram.status === 'fulfilled') state.histogram = histogram.value;
     if (tx.status === 'fulfilled') state.transactions = Array.isArray(tx.value?.transactions) ? tx.value.transactions : [];
 
+    state.latency = latency === null ? state.latency : Math.round(latency);
+    $('#readout-state').textContent = stats.status === 'fulfilled' ? 'live' : 'partial';
+    $('#readout-state').classList.toggle('ok', stats.status === 'fulfilled');
+
     renderAll();
     markSync();
   }
 
   async function loadTick() {
+    const started = performance.now();
     try {
       const data = await api('/tick/current', 8000);
       const previous = state.tick ? Number(state.tick.tick) : null;
       state.tick = data;
-      renderPulse();
-      if (previous !== null && Number(data.tick) > previous) {
-        const el = $('#tick-value');
-        el.style.color = 'var(--lime)';
-        setTimeout(() => { el.style.color = ''; }, 700);
-      }
+      state.latency = Math.round(performance.now() - started);
+      renderReadout();
+      if (previous !== null && Number(data.tick) > previous) flashTick();
       markSync();
-    } catch { /* keep last value */ }
+    } catch {
+      /* keep the last good value */
+    }
+  }
+
+  function flashTick() {
+    const el = $('#ro-tick');
+    if (!el) return;
+    el.classList.add('is-fresh');
+    setTimeout(() => el.classList.remove('is-fresh'), 900);
   }
 
   function renderAll() {
-    renderPulse();
-    renderStats();
+    renderReadout();
+    renderStrip();
     renderComposition();
-    renderHistogram();
+    renderChart();
     renderValidators();
     renderWallets();
+    renderStaking();
     renderEconomy();
-    renderSignals();
+    renderWire();
+    renderTape();
   }
 
-  function renderPulse() {
+  /* ---------------- hero readout ---------------- */
+  function renderReadout() {
     const tick = state.tick;
-    if (!tick) return;
-    $('#tick-value').textContent = `#${int(tick.tick)}`;
-    $('#tick-meta').textContent = `${int(tick.total_blocks)} blocks in mesh`;
+    if (tick) {
+      $('#ro-tick').textContent = `#${int(tick.tick)}`;
+      $('#ro-blocks').textContent = int(state.stats?.blocks_finalized ?? tick.total_blocks);
+      $('#ro-open').textContent = int(tick.open_blocks);
+    }
+    if (state.latency !== null) $('#ro-rpc').textContent = `${int(state.latency)} ms`;
   }
 
-  function renderStats() {
+  /* ---------------- totals strip ---------------- */
+  function renderStrip() {
     const stats = state.stats;
     if (!stats) return;
     const tx = stats.totals?.transactions || {};
     const total = Number(tx.total) || 0;
+    const calls = Number(tx.contract_call) || 0;
+    const deploys = Number(tx.contract_deploy) || 0;
+    const windows = stats.wallet_windows || [];
+    const new24 = windows.find((w) => Number(w.hours) === 24)?.new_wallets;
+
     $('#s-total').textContent = int(total);
-    $('#s-total-note').textContent = `${int(stats.blocks_finalized)} blocks finalized`;
+    $('#s-total-note').textContent = 'since genesis';
     $('#s-transfer').textContent = int(tx.transfer);
     $('#s-transfer-note').textContent = `${pct(tx.transfer, total)}% of all actions`;
-    const calls = Number(tx.contract_call) || 0, deploys = Number(tx.contract_deploy) || 0;
     $('#s-contracts').textContent = int(calls + deploys);
     $('#s-contracts-note').textContent = `${int(calls)} calls · ${int(deploys)} deploys`;
-    const wallets = stats.totals?.wallets ?? stats.wallets ?? null;
-    $('#s-wallets').textContent = int(wallets);
-    $('#s-wallets-note').textContent = `${int((stats.wallet_windows || []).find((w) => Number(w.hours) === 24)?.new_wallets)} new in 24h`;
+    $('#s-wallets').textContent = int(stats.totals?.wallets ?? stats.wallets);
+    $('#s-wallets-note').textContent = `${int(new24)} new in 24h`;
     $('#s-blocks').textContent = int(stats.blocks_finalized);
-    $('#s-blocks-note').textContent = `${int(state.tick?.open_blocks)} open blocks`;
+    $('#s-blocks-note').textContent = `${int(state.tick?.open_blocks)} open now`;
+    $('#s-nft').textContent = state.nftTotal === null ? '—' : int(state.nftTotal);
   }
 
+  /* ---------------- composition ---------------- */
   function renderComposition() {
     const tx = state.stats?.totals?.transactions || {};
     const total = Number(tx.total) || 0;
-    $('#composition-total').textContent = `${int(total)} actions`;
-    const rows = TYPES.map((t) => ({ ...t, value: Number(tx[t.key]) || 0 }))
-      .filter((item) => item.value > 0)
-      .sort((a, b) => b.value - a.value);
+    const rows = TYPES.map((t) => ({ ...t, value: Number(tx[t.key]) || 0 })).filter((r) => r.value > 0);
+
     if (!rows.length) return;
-    let acc = 0;
-    const stops = rows.map((item) => {
-      const share = total ? (item.value / total) * 100 : 0;
-      const start = acc;
-      acc += share;
-      return `${item.color} ${start.toFixed(3)}% ${acc.toFixed(3)}%`;
+    $('#composition-total').textContent = `${int(total)} actions`;
+
+    let cursor = 0;
+    const stops = rows.map((row) => {
+      const share = total ? (row.value / total) * 100 : 0;
+      const from = cursor;
+      cursor += share;
+      return `${row.color} ${from.toFixed(3)}% ${cursor.toFixed(3)}%`;
     });
-    $('#donut').style.background = `conic-gradient(${stops.join(',')})`;
-    $('#donut-main').textContent = `${pct(rows[0].value, total)}%`;
-    $('#legend').innerHTML = rows.map((item) => `<div class="legend-row">
-      <i style="background:${item.color}"></i><span>${esc(item.label)}</span>
-      <b>${int(item.value)}</b><small>${pct(item.value, total)}%</small>
+    $('#donut').style.background = `conic-gradient(${stops.join(', ')})`;
+
+    const lead = rows[0];
+    $('#donut-main').textContent = `${pct(lead.value, total)}%`;
+    $('#donut-sub').textContent = lead.label.toLowerCase();
+
+    $('#legend').innerHTML = rows.slice(0, 6).map((row) => `<div class="type-row">
+      <span class="type-name"><i style="background:${row.color}"></i>${esc(row.label)}</span>
+      <span class="type-track"><i class="type-fill" style="width:${pct(row.value, rows[0].value)}%;background:${row.color}"></i></span>
+      <span class="type-count">${int(row.value)}</span>
     </div>`).join('');
   }
 
-  function renderHistogram() {
+  /* ---------------- chart ---------------- */
+  function renderChart() {
     const data = state.histogram;
-    if (!data || !Array.isArray(data.buckets)) return;
-    const buckets = data.buckets;
-    const max = Math.max(...buckets.map((b) => Number(b.count) || 0), 1);
-    const labelEvery = Math.ceil(buckets.length / 7);
-    $('#bars').innerHTML = buckets.map((b, i) => {
-      const height = Math.max(3, ((Number(b.count) || 0) / max) * 100);
-      const date = new Date(Number(b.start_ts) * 1000);
-      const label = state.range === '1d'
+    if (!data || !Array.isArray(data.buckets) || !data.buckets.length) return;
+
+    const W = 600;
+    const H = 190;
+    const top = 14;
+    const bottom = 16;
+    const counts = data.buckets.map((b) => Number(b.count) || 0);
+    const max = Math.max(...counts, 1);
+    const n = counts.length;
+    const step = n > 1 ? (W - 10) / (n - 1) : 0;
+    const x = (i) => 5 + i * step;
+    const y = (c) => H - bottom - (c / max) * (H - top - bottom);
+
+    const points = counts.map((c, i) => [x(i), y(c)]);
+    const line = points.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+    const area = `${line} L${x(n - 1).toFixed(1)},${H - bottom} L${x(0).toFixed(1)},${H - bottom} Z`;
+
+    $('#chart-line').setAttribute('d', line);
+    $('#chart-area').setAttribute('d', area);
+
+    $('#chart-grid').innerHTML = [0.25, 0.5, 0.75, 1].map((t) => {
+      const gy = (H - bottom - t * (H - top - bottom)).toFixed(1);
+      return `<line class="grid-line" x1="0" x2="${W}" y1="${gy}" y2="${gy}" />`;
+    }).join('');
+
+    const labelCount = Math.min(window.innerWidth < 620 ? 4 : 7, n);
+    const stride = Math.max(1, Math.ceil(n / labelCount));
+    const indices = [];
+    for (let i = 0; i < n; i += stride) indices.push(i);
+    if (indices[indices.length - 1] !== n - 1) indices.push(n - 1);
+
+    $('#chart-x').innerHTML = indices.map((i) => {
+      const date = new Date(Number(data.buckets[i].start_ts) * 1000);
+      const text = state.range === '1d'
         ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
         : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      return `<div class="bar-col"><i style="height:${height}%"></i>${i % labelEvery === 0 ? `<span>${esc(label)}</span>` : '<span></span>'}</div>`;
+      const left = Math.min(96, Math.max(4, (x(i) / W) * 100));
+      return `<span style="left:${left}%">${esc(text)}</span>`;
     }).join('');
-    $('#momentum-sub').textContent = state.range === '1d' ? 'Rolling 24 hours' : state.range === '7d' ? 'Rolling 7 days' : 'Rolling 30 days';
-    $('#bar-total').textContent = `${int(data.total)} in range`;
-    $('#bar-peak').textContent = `peak ${int(max)} / bucket`;
+
+    $('#momentum-sub').textContent = state.range === '1d'
+      ? 'Rolling 24 hours'
+      : state.range === '7d' ? 'Rolling 7 days' : 'Rolling 30 days';
+    $('#chart-total').textContent = `${int(data.total)} actions in range`;
+    $('#chart-peak').textContent = `peak ${int(max)} per bucket`;
   }
 
+  /* ---------------- validators ---------------- */
   function renderValidators() {
     const nodes = state.stats?.nodes || {};
-    const parts = [nodes.keepers, nodes.suits, nodes.workers];
-    const online = parts.reduce((sum, n) => sum + (Number(n?.online) || 0), 0);
-    const all = parts.reduce((sum, n) => sum + (Number(n?.total) || 0), 0);
+    const rows = [
+      ['Keepers', nodes.keepers?.online, nodes.keepers?.total, 'signing'],
+      ['Suits', nodes.suits?.online, nodes.suits?.total, 'consensus'],
+      ['Workers', nodes.workers?.online, nodes.workers?.total, 'execution'],
+      ['RPC', nodes.rpc?.total, nodes.rpc?.total, 'endpoints']
+    ];
+
+    const online = rows.reduce((sum, [, on]) => sum + (Number(on) || 0), 0);
+    const all = rows.reduce((sum, [, , total]) => sum + (Number(total) || 0), 0);
     const share = all ? (online / all) * 100 : 0;
-    $('#gauge').style.background = `conic-gradient(var(--lime) 0 ${share.toFixed(2)}%, var(--line) ${share.toFixed(2)}% 100%)`;
-    $('#gauge-value').textContent = `${Math.round(share)}%`;
+
+    $('#health-value').textContent = `${Math.round(share)}%`;
+    $('#health-bar').style.width = `${share}%`;
+
     const chip = $('#node-chip');
-    chip.textContent = all ? `${online}/${all} online` : '—';
+    chip.textContent = all ? `${int(online)}/${int(all)} online` : '—';
     chip.classList.toggle('ok', all > 0 && online === all);
-    const cells = [
-      ['Keepers', nodes.keepers], ['Suits', nodes.suits], ['Workers', nodes.workers], ['RPC nodes', nodes.rpc]
-    ].map(([label, node]) => {
-      const on = node?.online !== undefined ? (Number(node.online) || 0) : (node?.total !== undefined ? (Number(node.total) || 0) : 0);
-      const total = Number(node?.total) || 0;
-      return `<div class="node-cell"><span>${esc(label)}</span><b>${int(on)}${total ? `<small style="font-size:11px;color:var(--muted-2)"> / ${int(total)}</small>` : ''}</b>
-        <div class="node-track"><i style="width:${total ? (on / total) * 100 : 100}%"></i></div></div>`;
-    });
-    $('#nodes').innerHTML = cells.join('');
+
+    $('#nodes').innerHTML = rows.map(([role, on, total, sub]) => {
+      const safeTotal = Number(total) || 0;
+      const safeOn = Number(on) || 0;
+      const width = safeTotal ? Math.min(100, (safeOn / safeTotal) * 100) : 0;
+      return `<div class="node-card">
+        <div class="node-top"><span class="node-role">${esc(role)}</span><span class="node-val"><b>${int(safeOn)}</b>/${int(safeTotal)}</span></div>
+        <div class="node-bar"><i style="width:${width}%"></i></div>
+        <div class="node-sub">${esc(sub)}</div>
+      </div>`;
+    }).join('');
   }
 
+  /* ---------------- wallets ---------------- */
   function renderWallets() {
     const windows = state.stats?.wallet_windows || [];
+    if (!windows.length) return;
+
     const max = Math.max(...windows.map((w) => Number(w.active_wallets) || 0), 1);
     $('#wallet-chip').textContent = `${int(windows.length)} windows`;
+
     $('#windows').innerHTML = windows.map((w) => {
       const hours = Number(w.hours);
       const label = hours === 24 ? '24h' : hours === 168 ? '7d' : hours === 720 ? '30d' : `${hours}h`;
-      return `<div class="window-row"><span>${label}</span>
-        <div class="window-track"><i style="width:${((Number(w.active_wallets) || 0) / max) * 100}%"></i></div>
-        <span class="window-meta"><b>${int(w.active_wallets)}</b> active · ${int(w.new_wallets)} new</span></div>`;
+      const active = Number(w.active_wallets) || 0;
+      const fresh = Number(w.new_wallets) || 0;
+      const freshMax = Math.max(...windows.map((x) => Number(x.new_wallets) || 0), 1);
+      return `<div class="window-row">
+        <span class="window-label">${label}</span>
+        <div class="window-bars">
+          <div class="window-bar active"><i style="width:${(active / max) * 100}%"></i></div>
+          <div class="window-bar new"><i style="width:${(fresh / freshMax) * 100}%"></i></div>
+        </div>
+        <span class="window-meta"><b>${int(active)}</b> active<br /><b>${int(fresh)}</b> new</span>
+      </div>`;
     }).join('');
+  }
+
+  /* ---------------- staking ---------------- */
+  function renderStaking() {
     const tx = state.stats?.totals?.transactions || {};
-    const stake = Number(tx.stake) || 0, unstake = Number(tx.unstake) || 0;
+    const stake = Number(tx.stake) || 0;
+    const unstake = Number(tx.unstake) || 0;
     const sum = stake + unstake;
+    const net = stake - unstake;
+
     $('#stake-count').textContent = int(stake);
     $('#unstake-count').textContent = int(unstake);
     $('#stake-bar').style.width = `${sum ? (stake / sum) * 100 : 50}%`;
-    $('#stake-note').textContent = `${pct(sum, tx.total)} of ledger is staking activity · net ${stake >= unstake ? '+' : ''}${int(stake - unstake)}`;
+    $('#stake-share').textContent = `${pct(stake, sum)}%`;
+    $('#unstake-share').textContent = `${pct(unstake, sum)}%`;
+
+    const chip = $('#stake-chip');
+    chip.textContent = `${net >= 0 ? '+' : ''}${int(net)} net`;
+    chip.classList.toggle('ok', net >= 0);
+
+    $('#stake-note').textContent = `${pct(sum, tx.total)}% of all ledger actions are staking activity. ${net >= 0 ? 'More commitments than exits' : 'More exits than commitments'} on record.`;
   }
 
+  /* ---------------- economy ---------------- */
   function renderEconomy() {
-    const summary = state.summary, safe = state.safehouse, fees = state.stats?.totals?.fees || {};
-    $('#rtd-supply').textContent = summary ? `${atomic(summary.supply_atomic)} RTD` : '—';
+    const summary = state.summary;
+    const safe = state.safehouse;
+    const fees = state.stats?.totals?.fees || {};
+
+    const supply = summary ? Number(atomic(summary.supply_atomic).replace(/,/g, '')) : NaN;
+    const compact = (n) => {
+      if (!Number.isFinite(n)) return null;
+      if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+      if (n >= 1e3) return `${(n / 1e3).toFixed(2)}K`;
+      return n.toFixed(2);
+    };
+    const supplyEl = $('#rtd-supply');
+    if (Number.isFinite(supply)) {
+      supplyEl.textContent = `${compact(supply)} RTD`;
+      supplyEl.title = `${atomic(summary.supply_atomic)} RTD`;
+    } else {
+      supplyEl.textContent = '—';
+      supplyEl.removeAttribute('title');
+    }
     $('#customers').textContent = summary ? int(summary.customers) : '—';
-    $('#backing').textContent = safe ? `${amount(safe.backing * 100, 2)}%` : '—';
+    $('#backing').textContent = safe ? `${amount(Number(safe.backing) * 100, 2)}%` : '—';
     $('#gas-collected').textContent = `${amount(fees.collected_rtm, 0)} RTM`;
+
     const chip = $('#backing-chip');
-    chip.textContent = summary?.backed ? 'BACKED' : 'CHECK BACKING';
-    chip.classList.toggle('ok', Boolean(summary?.backed));
+    const backed = Boolean(summary?.backed);
+    chip.textContent = backed ? 'fully backed' : 'check backing';
+    chip.classList.toggle('ok', backed);
+
     $('#gas-burned').textContent = `${amount(fees.burned_rtm, 2)} RTM burned`;
-    const parts = [
-      ['Workers', Number(fees.workers_rtm) || 0, 'var(--teal)'],
-      ['Foundation', Number(fees.foundation_rtm) || 0, 'var(--lime)'],
-      ['Keepers', Number(fees.keepers_rtm) || 0, 'var(--blue)'],
-      ['Suits', Number(fees.suits_rtm) || 0, 'var(--violet)'],
-      ['Treasury', Number(fees.treasury_rtm) || 0, 'var(--orange)'],
-      ['Burned', Number(fees.burned_rtm) || 0, 'var(--pink)']
+
+    const rows = [
+      ['Workers', Number(fees.workers_rtm) || 0, '#ff7a1a'],
+      ['Foundation', Number(fees.foundation_rtm) || 0, '#ffb066'],
+      ['Keepers', Number(fees.keepers_rtm) || 0, '#5b8def'],
+      ['Suits', Number(fees.suits_rtm) || 0, '#3ecf6f'],
+      ['Treasury', Number(fees.treasury_rtm) || 0, '#b07cf7'],
+      ['Burned', Number(fees.burned_rtm) || 0, '#e0b341']
     ];
-    const total = parts.reduce((s, p) => s + p[1], 0) || 1;
-    $('#gas-stack').innerHTML = parts.map(([, value, color]) => `<i style="width:${(value / total) * 100}%;background:${color}"></i>`).join('');
-    $('#gas-legend').innerHTML = parts.map(([label, value, color]) => `<span><i style="background:${color}"></i>${esc(label)} ${pct(value, total)}%</span>`).join('');
+    const total = rows.reduce((sum, [, value]) => sum + value, 0) || 1;
+
+    $('#gas-bars').innerHTML = rows.map(([label, value, color]) => `<div class="fee-bar-row">
+      <span>${esc(label)}</span>
+      <span class="type-track"><i class="type-fill" style="width:${(value / total) * 100}%;background:${color}"></i></span>
+      <b>${amount(value, value < 10 ? 2 : 0)} RTM</b>
+    </div>`).join('');
   }
 
+  /* ---------------- wire + tape ---------------- */
   function actionLabel(raw) {
     const key = String(raw || '').toLowerCase();
-    if (key === 'call') return 'Contract call';
+    if (key === 'call' || key === 'contract_call') return 'Contract call';
     if (key === 'transfer') return 'Transfer';
+    if (key === 'deploy' || key === 'contract_deploy') return 'Contract deploy';
+    if (key === 'stake') return 'Stake';
+    if (key === 'unstake') return 'Unstake';
+    if (key === 'validator') return 'Validator';
     if (key.startsWith('safehouse')) return `Safehouse ${key.replace('safehouse_', '')}`.trim();
-    if (key === 'deploy') return 'Contract deploy';
     return key.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'Action';
   }
 
-  function renderSignals() {
-    const list = state.transactions.slice(0, 7);
-    $('#signal-count').textContent = `${int(list.length)} shown`;
-    $('#signals').innerHTML = list.map((tx) => `<div class="signal-row">
-      <i></i>
-      <span><b>${esc(actionLabel(tx.action))}</b><small>${esc(short(tx.sender, 10, 6))} → ${esc(short(tx.recipient, 10, 6))}</small></span>
-      <span>${amount(tx.amount_rtm, 2)} RTM<br /><b>${esc(timeAgo(tx.timestamp))}</b></span>
-    </div>`).join('');
+  function actionColor(raw) {
+    const key = String(raw || '').toLowerCase();
+    if (key.startsWith('safehouse')) return ACTION_COLORS.safehouse;
+    return ACTION_COLORS[key] || '#6e7781';
+  }
+
+  function renderWire() {
+    const list = state.transactions.slice(0, 9);
+    const host = $('#wire');
+    if (!list.length) {
+      host.innerHTML = '<div class="empty-state">No transactions returned yet.</div>';
+      return;
+    }
+    $('#wire-state').textContent = `${int(state.transactions.length)} loaded`;
+    host.innerHTML = list.map((tx) => {
+      const color = actionColor(tx.action);
+      const value = Number(tx.amount_rtm) > 0
+        ? `${amount(tx.amount_rtm, 3)} <b>RTM</b>`
+        : '<span style="color:#4a545f">0 RTM</span>';
+      return `<div class="wire-row">
+        <i style="background:${color}"></i>
+        <div class="wire-main">
+          <b>${esc(actionLabel(tx.action))}</b>
+          <span>${esc(short(tx.sender, 10, 6))} → ${esc(short(tx.recipient, 10, 6))}</span>
+        </div>
+        <div class="wire-value">${value}<small>${esc(timeAgo(tx.timestamp))} ago</small></div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderTape() {
+    const host = $('#tape');
+    const list = state.transactions.slice(0, 12);
+    if (!list.length) {
+      host.innerHTML = '<span class="tape-empty">Waiting for the next actions…</span>';
+      return;
+    }
+    host.innerHTML = list.map((tx) => `<span class="tape-item">
+      <i style="background:${actionColor(tx.action)}"></i>
+      <b>${esc(actionLabel(tx.action))}</b>
+      ${Number(tx.amount_rtm) > 0 ? `${esc(amount(tx.amount_rtm, 2))} RTM` : 'no value'}
+      <em>${esc(timeAgo(tx.timestamp))}</em>
+    </span>`).join('');
   }
 
   /* ---------------- NFT layer ---------------- */
   const metaCache = new Map();
 
   function ipfsPath(uri) {
-    const v = String(uri || '').trim();
-    if (v.startsWith('ipfs://ipfs/')) return v.slice(11);
-    if (v.startsWith('ipfs://')) return v.slice(7);
-    if (v.startsWith('/ipfs/')) return v.slice(6);
-    if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[a-z0-9]+)$/i.test(v)) return v;
+    const value = String(uri || '').trim();
+    if (value.startsWith('ipfs://ipfs/')) return value.slice(11);
+    if (value.startsWith('ipfs://')) return value.slice(7);
+    if (value.startsWith('/ipfs/')) return value.slice(6);
+    if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[a-z0-9]+)$/i.test(value)) return value;
     return null;
   }
+
   function candidates(uri) {
     const path = ipfsPath(uri);
-    if (path) return [...GATEWAYS.map((g) => g + path), `https://images.weserv.nl/?url=${encodeURIComponent(`ipfs.filebase.io/ipfs/${path}`)}&w=480&h=480&fit=cover&output=webp&q=80`];
-    return /^https?:\/\//.test(String(uri)) ? [String(uri)] : [];
-  }
-  function imageFallbacks(root) {
-    $$('img', root).forEach((img) => {
-      if (img.dataset.fallback) return;
-      const original = img.src;
-      img.dataset.fallback = '1';
-      img.onerror = () => {
-        if (img.dataset.retried) return;
-        img.dataset.retried = '1';
-        img.src = original.includes('ipfs.filebase.io')
-          ? original.replace('ipfs.filebase.io', 'gateway.pinata.cloud')
-          : original.replace('gateway.pinata.cloud', 'ipfs.filebase.io');
-      };
-    });
+    if (path) return [`https://images.weserv.nl/?url=${encodeURIComponent(`ipfs.filebase.io/ipfs/${path}`)}&w=480&h=480&fit=cover&output=webp&q=80`, ...GATEWAYS.map((g) => g + path)];
+    const value = String(uri || '').trim();
+    return /^https?:\/\//.test(value) ? [value] : [];
   }
 
   async function jsonUri(uri) {
@@ -316,36 +521,59 @@
     const value = String(uri || '').trim();
     const urls = path ? GATEWAYS.map((g) => g + path) : (/^https?:\/\//.test(value) ? [value] : []);
     for (const url of urls) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 9000);
       try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 9000);
-        try {
-          const res = await fetch(url, { signal: ctrl.signal, cache: 'force-cache' });
-          if (res.ok) return await res.json();
-        } finally { clearTimeout(timer); }
-      } catch { /* next */ }
+        const res = await fetch(url, { signal: ctrl.signal, cache: 'force-cache' });
+        if (res.ok) return await res.json();
+      } catch {
+        /* try the next gateway */
+      } finally {
+        clearTimeout(timer);
+      }
     }
     return null;
   }
+
   async function tokenMeta(contract, token) {
     const key = `${contract}:${token}`;
     if (metaCache.has(key)) return metaCache.get(key);
     const promise = (async () => {
       try {
         const query = await api(`/contract/${contract}/query?method=token_uri&args=${encodeURIComponent(token)}`, 10000);
-        let uri = query?.output;
-        if (typeof uri === 'string') { try { const parsed = JSON.parse(uri); uri = typeof parsed === 'string' ? parsed : parsed; } catch { /* plain */ } }
-        const meta = (uri && typeof uri === 'object') ? uri : (typeof uri === 'string' && uri.trim() ? await jsonUri(uri) : null);
-        if (!meta) return null;
-        const image = meta.image || meta.image_url || '';
+        const raw = unwrapUri(query?.output);
+        if (!raw) return null;
+        const meta = typeof raw === 'object' ? raw : await jsonUri(raw);
+        if (!meta || typeof meta !== 'object') return null;
+        const image = meta.image || meta.image_url || meta.imageUri || '';
         return { name: String(meta.name || ''), image: candidates(image)[0] || '' };
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     })();
     metaCache.set(key, promise);
     return promise;
   }
 
-  async function discover() {
+  function safeParse(raw) {
+    try { return JSON.parse(raw); } catch { return null; }
+  }
+
+  function unwrapUri(raw) {
+    let value = String(raw ?? '').trim();
+    if (!value) return '';
+    if (value.startsWith('"')) {
+      const parsed = safeParse(value);
+      if (typeof parsed === 'string') value = parsed.trim();
+    } else if (value.startsWith('{')) {
+      const parsed = safeParse(value);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+    return value;
+  }
+
+  async function discoverCollections() {
+    showNftSkeleton();
     const found = new Set();
     for (let page = 0; page < 3; page += 1) {
       const data = await api(`/transactions?limit=100&offset=${page * 100}`);
@@ -357,7 +585,8 @@
         if (contract && NFT_METHODS.has(method)) found.add(contract);
       });
     }
-    const ids = Array.from(found).slice(0, 10);
+
+    const ids = Array.from(found).slice(0, 12);
     const valid = [];
     for (let i = 0; i < ids.length; i += 4) {
       const batch = ids.slice(i, i + 4);
@@ -367,59 +596,117 @@
         if (res.status === 'fulfilled' && type.includes('NFT')) valid.push(batch[idx]);
       });
     }
-    state.collections = valid.slice(0, 8);
+
+    state.collections = valid.slice(0, 8).map((id) => ({ id, supply: 0, cover: '', name: '', token: null, events: [] }));
     await loadCollections();
+  }
+
+  function showNftSkeleton() {
+    $('#collection-grid').innerHTML = Array.from({ length: 4 }, () => '<div class="collection-row skeleton" aria-hidden="true"></div>').join('');
+    $('#nft-count').textContent = 'scanning…';
   }
 
   async function loadCollections() {
     if (state.nftBusy) return;
     state.nftBusy = true;
     try {
-      const items = await Promise.all(state.collections.map(async (id) => {
-        const [meta, supplyRes, eventsRes] = await Promise.allSettled([
-          api(`/contract/${id}`),
-          api(`/contract/${id}/query?method=total_supply&args=`),
-          api(`/contract/${id}/events`)
+      const items = await Promise.all(state.collections.map(async (entry) => {
+        const [supplyRes, eventsRes] = await Promise.allSettled([
+          api(`/contract/${entry.id}/query?method=total_supply&args=`),
+          api(`/contract/${entry.id}/events`)
         ]);
         const events = eventsRes.value?.events || [];
         const supply = Number(supplyRes.value?.output) || 0;
-        const mint = events.find((e) => e.event_type === 'Transfer' && String(e.data || '').includes('"from":"0x0"'));
+
         let token = null;
-        try { token = mint ? JSON.parse(mint.data).id : null; } catch { /* none */ }
-        const metaInfo = token ? await tokenMeta(id, token) : null;
+        const mintEvent = events.find((e) => {
+          const raw = String(e.data || '');
+          return raw.includes('"from":"0x0"') || String(e.event_type || '').toLowerCase() === 'mint';
+        });
+        if (mintEvent) {
+          const parsed = safeParse(mintEvent.data);
+          token = parsed?.id ?? parsed?.token_id ?? null;
+        }
+
         return {
-          id,
-          name: `Collection ${short(id, 6, 4)}`,
+          id: entry.id,
+          name: `Collection ${short(entry.id, 6, 4)}`,
           supply,
           events,
-          cover: metaInfo?.image || '',
-          token
+          token,
+          cover: ''
         };
       }));
+
       state.collections = items;
+      state.nftTotal = items.reduce((sum, item) => sum + Math.max(Number(item.supply) || 0, countMints(item.events)), 0);
+
       renderCollections();
-      const total = items.reduce((s, item) => s + item.supply, 0);
-      $('#s-nft').textContent = int(total);
+      $('#s-nft').textContent = int(state.nftTotal);
       $('#s-nft-note').textContent = `across ${items.length} discovered contracts`;
       $('#nft-count').textContent = `${items.length} discovered`;
-    } finally { state.nftBusy = false; }
+      $('#gallery-sub').textContent = 'Pick a holder from the latest NFT activity';
+
+      items.forEach((item) => hydrateCollection(item.id));
+    } finally {
+      state.nftBusy = false;
+    }
+  }
+
+  function countMints(events) {
+    return (events || []).filter((e) => {
+      const raw = String(e.data || '');
+      return raw.includes('"from":"0x0"') || String(e.event_type || '').toLowerCase() === 'mint';
+    }).length;
+  }
+
+  async function hydrateCollection(id) {
+    const item = state.collections.find((entry) => entry.id === id);
+    if (!item || item.token === null || item.cover) return;
+    const meta = await tokenMeta(id, item.token);
+    if (!meta) return;
+    const derived = meta.name ? meta.name.replace(/\s*#?\d+\s*$/, '').trim() : '';
+    if (derived.length > 2) item.name = derived;
+    item.cover = meta.image || '';
+
+    const row = document.querySelector(`.collection-row[data-collection="${id}"]`);
+    if (!row) return;
+    const nameEl = row.querySelector('.cname');
+    if (nameEl && item.name) nameEl.textContent = item.name;
+    const img = row.querySelector('.collection-cover img');
+    if (img && item.cover) img.src = item.cover;
   }
 
   function renderCollections() {
     const host = $('#collection-grid');
     if (!state.collections.length) {
-      host.innerHTML = '<p class="hint" style="grid-column:1/-1">No NFT contracts found in recent activity. Press “Scan chain” to try again.</p>';
+      host.innerHTML = '<div class="empty-state">No NFT contracts in the latest activity. Press “Scan chain” to look again.</div>';
       return;
     }
+
     host.innerHTML = state.collections.map((item) => {
-      const count = (type) => item.events.filter((e) => String(e.event_type || '').toLowerCase().includes(type)).length;
+      const events = item.events || [];
+      const transfers = events.filter((e) => String(e.event_type || '').toLowerCase().includes('transfer')).length;
+      const burns = events.filter((e) => String(e.event_type || '').toLowerCase().includes('burn')).length;
       const cover = item.cover
-        ? `<img src="${esc(item.cover)}" alt="" loading="lazy" />`
-        : '<span class="placeholder">NFT</span>';
-      return `<article class="collection">${cover}
-        <div><h3>${esc(item.name)}</h3><span class="cid">${esc(item.id)}</span>
-          <div class="counts"><span>SUPPLY <b>${int(item.supply)}</b></span><span>MINTS <b>${int(count('mint')) + count('drop')}</b></span><span>TRANSFERS <b>${int(count('transfer'))}</b></span></div>
-        </div></article>`;
+        ? `<img src="${esc(item.cover)}" alt="" decoding="async" />`
+        : '<img alt="" decoding="async" />';
+      return `<div class="collection-row" data-collection="${esc(item.id)}">
+        <div class="collection-cover">
+          <span class="nft-fallback">NFT</span>
+          ${cover}
+        </div>
+        <div class="collection-info">
+          <div class="collection-name"><span class="cname">${esc(item.name)}</span> <span class="tag">NFT</span></div>
+          <span class="collection-id">${esc(short(item.id, 14, 8))}</span>
+          <div class="collection-stats">
+            <span>Supply <b>${int(item.supply)}</b></span>
+            <span>Mints <b>${int(countMints(events))}</b></span>
+            <span>Xfers <b>${int(transfers)}</b></span>
+            <span>Burns <b>${int(burns)}</b></span>
+          </div>
+        </div>
+      </div>`;
     }).join('');
     imageFallbacks(host);
   }
@@ -428,9 +715,9 @@
     for (const item of state.collections) {
       const events = [...(item.events || [])].sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
       for (const event of events) {
-        let data = {};
-        try { data = JSON.parse(event.data || '{}'); } catch { /* skip */ }
-        if (typeof data.to === 'string' && /^rete[a-z0-9]+$/i.test(data.to)) return data.to;
+        const data = safeParse(event.data) || {};
+        const to = data.to || data.recipient;
+        if (typeof to === 'string' && /^rete[a-z0-9]+$/i.test(to)) return to;
       }
     }
     return null;
@@ -438,23 +725,55 @@
 
   async function loadGallery(address) {
     const host = $('#gallery');
-    host.innerHTML = '<p class="hint">Loading artwork…</p>';
+    host.innerHTML = '<div class="empty-state">Loading artwork…</div>';
     try {
       const data = await api(`/wallet/${encodeURIComponent(address)}/nfts?limit=12&offset=0`);
       const nfts = Array.isArray(data?.nfts) ? data.nfts : [];
-      if (!nfts.length) { host.innerHTML = '<p class="hint">This wallet holds no NFTs right now.</p>'; return; }
-      const items = await Promise.all(nfts.slice(0, 12).map(async (nft) => {
-        const meta = await tokenMeta(String(nft.contract_id).toLowerCase(), nft.token_id);
-        return { id: nft.token_id, contract: nft.contract_id, ...meta };
-      }));
-      host.innerHTML = items.map((item) => `<article class="art">
-        ${item.image ? `<img src="${esc(item.image)}" alt="" loading="lazy" />` : `<div class="fallback">#${esc(item.id)}</div>`}
-        <div><b>${esc(item.name || `NFT #${item.id}`)}</b><small>${esc(short(item.contract, 8, 5))}</small></div>
+      if (!nfts.length) {
+        host.innerHTML = '<div class="empty-state">This wallet holds no NFTs right now.</div>';
+        return;
+      }
+
+      $('#gallery-sub').textContent = `${nfts.length} pieces · ${short(address, 10, 6)}`;
+
+      const cards = nfts.slice(0, 12);
+      host.innerHTML = cards.map((nft, i) => `<article class="nft-card">
+        <div class="nft-thumb">
+          <span class="nft-fallback">#${esc(nft.token_id)}</span>
+          <img alt="" decoding="async" data-slot="${i}" />
+        </div>
+        <div class="nft-meta">
+          <b class="nft-name" data-name="${i}">Token #${esc(nft.token_id)}</b>
+          <span class="nft-contract">${esc(short(nft.contract_id, 10, 6))}</span>
+        </div>
       </article>`).join('');
       imageFallbacks(host);
+
+      await Promise.all(cards.map(async (nft, i) => {
+        const meta = await tokenMeta(String(nft.contract_id).toLowerCase(), nft.token_id);
+        if (!meta) return;
+        const img = host.querySelector(`img[data-slot="${i}"]`);
+        const name = host.querySelector(`[data-name="${i}"]`);
+        if (name && meta.name) name.textContent = meta.name;
+        if (img && meta.image) img.src = meta.image;
+      }));
     } catch (err) {
-      host.innerHTML = `<p class="hint">Could not load this wallet: ${esc(err.message)}</p>`;
+      host.innerHTML = `<div class="empty-state">Could not load this wallet: ${esc(err.message)}</div>`;
     }
+  }
+
+  function imageFallbacks(root) {
+    $$('img', root).forEach((img) => {
+      img.addEventListener('load', () => img.classList.add('is-loaded'), { once: true });
+      img.addEventListener('error', () => {
+        if (img.dataset.retried) return;
+        img.dataset.retried = '1';
+        img.src = img.src.includes('ipfs.filebase.io')
+          ? img.src.replace('ipfs.filebase.io', 'gateway.pinata.cloud')
+          : img.src.replace('gateway.pinata.cloud', 'ipfs.filebase.io');
+      }, { once: true });
+      if (img.complete && img.naturalWidth > 0) img.classList.add('is-loaded');
+    });
   }
 
   /* ---------------- wiring ---------------- */
@@ -462,32 +781,81 @@
     const button = event.target.closest('button[data-range]');
     if (!button) return;
     state.range = button.dataset.range;
-    $$('#ranges button').forEach((el) => el.classList.toggle('on', el === button));
-    api(`/transactions/histogram?range=${state.range}&tz=${-new Date().getTimezoneOffset()}`)
-      .then((data) => { state.histogram = data; renderHistogram(); })
+    $$('#ranges button').forEach((el) => el.classList.toggle('is-active', el === button));
+    const tz = -new Date().getTimezoneOffset();
+    api(`/transactions/histogram?range=${state.range}&tz=${tz}`)
+      .then((data) => { state.histogram = data; renderChart(); })
       .catch(() => {});
   });
 
   $('#scan-nft').addEventListener('click', async (event) => {
     const button = event.currentTarget;
+    if (button.disabled) return;
     button.disabled = true;
     button.textContent = 'Scanning…';
-    try { await discover(); } finally { button.disabled = false; button.textContent = 'Scan chain'; }
+    try {
+      await discoverCollections();
+    } catch {
+      $('#collection-grid').innerHTML = '<div class="empty-state">Scan failed. Try again in a moment.</div>';
+      $('#nft-count').textContent = '—';
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Scan chain';
+    }
   });
 
   $('#load-holder').addEventListener('click', () => {
     const address = latestHolder();
-    if (!address) { $('#gallery').innerHTML = '<p class="hint">No NFT holder found yet. Scan the chain first.</p>'; return; }
+    if (!address) {
+      $('#gallery').innerHTML = '<div class="empty-state">No NFT holder found yet — scan the chain first.</div>';
+      return;
+    }
     loadGallery(address);
   });
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { loadTick(); loadCore(); }
+  $('#refresh-btn').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.classList.add('is-loading');
+    try { await loadCore(); } finally { button.classList.remove('is-loading'); }
   });
 
+  const header = $('#site-header');
+  const onScroll = () => header.classList.toggle('is-scrolled', window.scrollY > 8);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  const menuBtn = $('#menu-btn');
+  const nav = $('#nav');
+  menuBtn.addEventListener('click', () => {
+    const open = nav.classList.toggle('open');
+    menuBtn.setAttribute('aria-expanded', String(open));
+  });
+  nav.addEventListener('click', (event) => {
+    if (event.target.closest('a')) {
+      nav.classList.remove('open');
+      menuBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      loadTick();
+      loadCore();
+    }
+  });
+
+  $('#year').textContent = new Date().getFullYear();
   loadCore();
-  discover();
-  setInterval(() => { if (document.visibilityState === 'visible') loadTick(); }, 3000);
-  setInterval(() => { if (document.visibilityState === 'visible') loadCore(); }, 10000);
+  discoverCollections().catch(() => {
+    $('#collection-grid').innerHTML = '<div class="empty-state">Could not scan the chain right now. Press “Scan chain” to retry.</div>';
+    $('#nft-count').textContent = '—';
+  });
+
+  setInterval(() => {
+    if (document.visibilityState === 'visible') loadTick();
+  }, 3000);
+  setInterval(() => {
+    if (document.visibilityState === 'visible') loadCore();
+  }, 10000);
   setInterval(updateAge, 1000);
 })();

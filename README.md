@@ -58,9 +58,9 @@ All data is fetched client-side from Retium's public endpoints (both send `Acces
 
 NFT artwork: `token_uri` points to IPFS metadata (name, image, attributes). The site fetches that metadata through public IPFS gateways and loads images via an image-optimization proxy, with direct-gateway fallbacks. Metadata is cached in `localStorage` (`retium-live.nftmeta.v1`, 7-day TTL).
 
-## Ringkasan view
+## Network brief
 
-`ringkasan/index.html` is a separate, explorer-free summary page: the same live data presented as a network snapshot with donut composition, momentum bars, validator gauge, wallet windows, NFT collection artwork, economy meters and a live signal feed. Open it from the **Ringkasan** item in the explorer header or at `/ringkasan/index.html` on GitHub Pages.
+`ringkasan/index.html` is a separate, explorer-free view of the same live data: an editorial one-pager with a live readout, lifetime totals strip, ledger composition donut, momentum chart, validator and wallet panels, staking split, RTM/RTD economy, a live wire of new actions and NFT collections with real artwork. Open it from the **Brief** item in the explorer header or at `/ringkasan/index.html` on GitHub Pages.
 
 ## NFT totals — honest caveat
 
@@ -110,7 +110,7 @@ Then on GitHub: **Settings → Pages → Source: GitHub Actions**. The site appe
 │   ├── app.js               # API layer, renderers, NFT indexer, art hydration
 │   ├── relive-logo.png      # transparent wordmark used in header/footer
 │   └── favicon.svg
-├── ringkasan/                # explorer-free network snapshot view
+├── ringkasan/               # network brief: same data, editorial layout
 │   ├── index.html
 │   ├── styles.css
 │   └── app.js
