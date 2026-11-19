@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#06080b" />
+  <title>RELIVE — Network Snapshot</title>
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="../index.html" aria-label="RELIVE explorer">
+        <img src="../assets/relive-logo.png" alt="RELIVE" height="22" />
+      </a>
+      <span class="divider"></span>
+      <span class="doc-label">NETWORK SNAPSHOT</span>
+      <div class="top-right">
+        <span class="live"><i></i>LIVE</span>
+        <a class="back" href="../index.html">Open explorer <span>↗</span></a>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro">
+        <div class="intro-copy">
+          <p class="kicker">01 / STATE OF NETWORK</p>
+          <h1>Retium,<br /><em>at a glance.</em></h1>
+          <p class="lede">A living summary of the network — ledger composition, momentum, validators, NFT collections and the RTM/RTD economy. Every figure is read from the public RPC in real time.</p>
+          <p class="sync">Synced <b id="sync-time">—</b><span id="sync-age">connecting…</span></p>
+        </div>
+        <div class="pulse" aria-hidden="true">
+          <div class="ring ring-3"></div>
+          <div class="ring ring-2"></div>
+          <div class="ring ring-1"></div>
+          <div class="core">
+            <span>CURRENT TICK</span>
+            <strong id="tick-value">—</strong>
+            <small id="tick-meta">syncing…</small>
+          </div>
+          <span class="orbit-dot d1"></span><span class="orbit-dot d2"></span><span class="orbit-dot d3"></span>
+        </div>
+      </section>
+
+      <section class="stats" id="stats" aria-live="polite">
+        <article class="card stat stat-lead">
+          <span class="stat-label">Total actions</span>
+          <strong id="s-total">—</strong>
+          <span class="stat-note" id="s-total-note">all-time ledger operations</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">Transfers</span>
+          <strong id="s-transfer">—</strong>
+          <span class="stat-note" id="s-transfer-note">share of ledger</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">Contracts</span>
+          <strong id="s-contracts">—</strong>
+          <span class="stat-note" id="s-contracts-note">calls + deploys</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">Wallets</span>
+          <strong id="s-wallets">—</strong>
+          <span class="stat-note" id="s-wallets-note">seen on chain</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">Blocks</span>
+          <strong id="s-blocks">—</strong>
+          <span class="stat-note" id="s-blocks-note">finalized</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">NFT indexed</span>
+          <strong id="s-nft">—</strong>
+          <span class="stat-note" id="s-nft-note">across tracked contracts</span>
+        </article>
+      </section>
+
+      <section class="duo">
+        <article class="card composition">
+          <div class="card-head">
+            <div><h2>Ledger composition</h2><p>What the network actually does</p></div>
+            <span class="chip" id="composition-total">—</span>
+          </div>
+          <div class="composition-body">
+            <div class="donut" id="donut"><span class="donut-hole"><b id="donut-main">—</b><small>actions</small></span></div>
+            <div class="legend" id="legend"></div>
+          </div>
+        </article>
+
+        <article class="card momentum">
+          <div class="card-head">
+            <div><h2>Transaction momentum</h2><p id="momentum-sub">Rolling 7 days</p></div>
+            <div class="segmented" id="ranges">
+              <button type="button" data-range="1d">24H</button>
+              <button type="button" data-range="7d" class="on">7D</button>
+              <button type="button" data-range="30d">30D</button>
+            </div>
+          </div>
+          <div class="bars" id="bars"></div>
+          <div class="bar-foot"><span id="bar-total">—</span><span id="bar-peak">—</span></div>
+        </article>
+      </section>
+
+      <section class="duo">
+        <article class="card validators">
+          <div class="card-head">
+            <div><h2>Validator layer</h2><p>Live node participation</p></div>
+            <span class="chip ok" id="node-chip">—</span>
+          </div>
+          <div class="validator-body">
+            <div class="gauge" id="gauge"><span class="gauge-hole"><b id="gauge-value">—</b><small>online</small></span></div>
+            <div class="node-list" id="nodes"></div>
+          </div>
+        </article>
+
+        <article class="card wallets-card">
+          <div class="card-head">
+            <div><h2>Wallet activity</h2><p>Active and new wallets by window</p></div>
+            <span class="chip" id="wallet-chip">—</span>
+          </div>
+          <div class="windows" id="windows"></div>
+          <div class="stake-line">
+            <div><span>STAKE</span><b id="stake-count">—</b></div>
+            <div class="stake-track"><i id="stake-bar"></i></div>
+            <div><span>UNSTAKE</span><b id="unstake-count">—</b></div>
+          </div>
+          <p class="foot-note" id="stake-note">—</p>
+        </article>
+      </section>
+
+      <section class="card nft-block">
+        <div class="card-head">
+          <div><h2>NFT layer</h2><p>Collections discovered from recent on-chain activity</p></div>
+          <div class="head-actions">
+            <span class="chip" id="nft-count">—</span>
+            <button type="button" class="btn" id="scan-nft">Scan chain</button>
+          </div>
+        </div>
+        <div class="collection-grid" id="collection-grid"></div>
+        <div class="gallery-head">
+          <h3>Wallet artwork</h3>
+          <button type="button" class="btn ghost" id="load-holder">Load latest holder</button>
+        </div>
+        <div class="gallery" id="gallery"><p class="hint">No wallet loaded. Pick the latest on-chain NFT holder above.</p></div>
+      </section>
+
+      <section class="duo">
+        <article class="card economy">
+          <div class="card-head">
+            <div><h2>RTM / RTD economy</h2><p>Supply, backing and gas distribution</p></div>
+            <span class="chip ok" id="backing-chip">—</span>
+          </div>
+          <div class="econ-grid">
+            <div class="econ-cell"><span>RTD supply</span><b id="rtd-supply">—</b></div>
+            <div class="econ-cell"><span>Customers</span><b id="customers">—</b></div>
+            <div class="econ-cell"><span>Safehouse backing</span><b id="backing">—</b></div>
+            <div class="econ-cell"><span>Gas collected</span><b id="gas-collected">—</b></div>
+          </div>
+          <div class="stack-head"><span>GAS ALLOCATION</span><span id="gas-burned">—</span></div>
+          <div class="stack" id="gas-stack"></div>
+          <div class="stack-legend" id="gas-legend"></div>
+        </article>
+
+        <article class="card signal">
+          <div class="card-head">
+            <div><h2>Live signal</h2><p>Newest ledger actions</p></div>
+            <span class="chip" id="signal-count">—</span>
+          </div>
+          <div class="signals" id="signals"></div>
+        </article>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>RELIVE · independent network snapshot</span>
+      <span>Data: rpc.retium.org/api · api.retium.money/api/summary</span>
+      <a href="../index.html">Back to explorer ↗</a>
+    </footer>
+  </div>
+  <script src="app.js" defer></script>
+</body>
+</html>

@@ -58,6 +58,10 @@ All data is fetched client-side from Retium's public endpoints (both send `Acces
 
 NFT artwork: `token_uri` points to IPFS metadata (name, image, attributes). The site fetches that metadata through public IPFS gateways and loads images via an image-optimization proxy, with direct-gateway fallbacks. Metadata is cached in `localStorage` (`retium-live.nftmeta.v1`, 7-day TTL).
 
+## Ringkasan view
+
+`ringkasan/index.html` is a separate, explorer-free summary page: the same live data presented as a network snapshot with donut composition, momentum bars, validator gauge, wallet windows, NFT collection artwork, economy meters and a live signal feed. Open it from the **Ringkasan** item in the explorer header or at `/ringkasan/index.html` on GitHub Pages.
+
 ## NFT totals — honest caveat
 
 Retium's public API exposes NFTs **per wallet** and **per contract**; there is no global network NFT counter. Instead of inventing a number, RELIVE scans recent transactions for NFT contract calls, verifies each contract via `/contract/{id}`, and indexes the collections it finds. The UI labels totals as **across tracked contracts**. You can add any contract id yourself with the form in the NFT section.
@@ -106,6 +110,10 @@ Then on GitHub: **Settings → Pages → Source: GitHub Actions**. The site appe
 │   ├── app.js               # API layer, renderers, NFT indexer, art hydration
 │   ├── relive-logo.png      # transparent wordmark used in header/footer
 │   └── favicon.svg
+├── ringkasan/                # explorer-free network snapshot view
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
 ├── docs/                    # README previews
 ├── .github/workflows/
 │   └── deploy.yml
