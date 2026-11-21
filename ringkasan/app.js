@@ -315,6 +315,28 @@
       : state.range === '7d' ? 'Rolling 7 days' : 'Rolling 30 days';
     $('#chart-total').textContent = `${int(data.total)} actions in range`;
     $('#chart-peak').textContent = `peak ${int(max)} per bucket`;
+
+    if (state.range === '7d') renderMomentumInsight(data);
+  }
+
+  function renderMomentumInsight(data) {
+    const host = $('#chart-insight');
+    if (!host) return;
+    const buckets = Array.isArray(data?.buckets) ? data.buckets : [];
+    if (buckets.length < 3) return;
+
+    const complete = buckets.slice(0, -1);
+    const yesterday = Number(complete[complete.length - 1]?.count || 0);
+    const prior = complete.slice(0, -1).map((b) => Number(b.count || 0));
+    const avg = prior.length ? prior.reduce((sum, n) => sum + n, 0) / prior.length : 0;
+
+    if (!avg) {
+      host.textContent = `Yesterday closed with ${int(yesterday)} actions.`;
+      return;
+    }
+    const pct = Math.round(((yesterday - avg) / avg) * 100);
+    const trend = pct === 0 ? 'level with' : pct > 0 ? `${Math.abs(pct)}% above` : `${Math.abs(pct)}% below`;
+    host.textContent = `Yesterday ${int(yesterday)} actions · ${trend} the ${prior.length}-day average.`;
   }
 
   /* ---------------- validators ---------------- */
