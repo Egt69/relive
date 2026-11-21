@@ -339,18 +339,11 @@
   background: linear-gradient(90deg, #ff7a1a, #ff9440);
   transition: width 0.9s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.brief .node-grid { margin-top: auto; }
-.brief .node-card { background: #080b0f; border: 1px solid #161d25; }
-.brief .node-role { color: var(--muted-2); }
-.brief .node-val { color: #fff; }
-.brief .node-val b { color: var(--muted); font-weight: 500; }
-.brief .node-bar { background: #151c24; }
-.brief .node-bar i { background: linear-gradient(90deg, #ff7a1a, #ff9440); }
 .node-roster {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 20px;
+  gap: 8px 10px;
   margin-top: auto;
   padding-top: 18px;
   border-top: 1px solid #151c24;
@@ -360,7 +353,7 @@
   color: var(--muted-2);
 }
 .node-roster span { white-space: nowrap; }
-.node-roster b { color: #fff; font-weight: 500; }
+.node-roster .sep { color: #3a424d; }
 
 /* ---------- wallets ---------- */
 .brief .windows { margin-top: 2px; }

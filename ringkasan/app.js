@@ -419,9 +419,12 @@
 
     const roster = $('#node-roster');
     if (roster) {
-      roster.innerHTML = rows.map(([role, on, total]) =>
-        `<span>${esc(role)} <b>${int(Number(on) || 0)}</b>/${int(Number(total) || 0)}</span>`
-      ).join('');
+      // Headline only — per-node detail lives on the explorer home page.
+      const keepers = `${int(Number(nodes.keepers?.online) || 0)}/${int(Number(nodes.keepers?.total) || 0)} keepers`;
+      const rpc = `${int(Number(nodes.rpc?.total) || 0)} RPC`;
+      roster.innerHTML = [keepers, rpc]
+        .map((text, i) => `${i ? '<span class="sep" aria-hidden="true">·</span>' : ''}<span>${esc(text)}</span>`)
+        .join('');
     }
   }
 
@@ -924,7 +927,7 @@
     host.innerHTML = top.map((pool) => {
       const id = String(pool.token_b || pool.token || '');
       return `<button type="button" class="pool-row" data-pool="${esc(id)}">
-        <span><b data-sym="${esc(id)}">${esc(short(id, 8, 4))}</b><small>${esc(short(id, 14, 8))}</small></span>
+        <span><b data-sym="${esc(id)}">${esc(short(id, 8, 4))}</b><small>${copyable(id, short(id, 14, 8))}</small></span>
         <span class="pool-col" data-price="${esc(id)}">—<span>RTM / token</span></span>
         <span class="pool-col" data-liq="${esc(id)}">${esc(fmtAmount(pool.reserve_rtm, 18, 0))}<span>RTM liq</span></span>
       </button>`;
@@ -1293,6 +1296,8 @@
     });
 
     $('#tools').addEventListener('click', (event) => {
+      // Copying an id must not also open the token page.
+      if (event.target.closest('[data-copy]')) return;
       const poolRow = event.target.closest('.pool-row[data-pool]');
       if (poolRow) {
         selectTool('token');

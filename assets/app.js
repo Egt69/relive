@@ -1533,7 +1533,29 @@
   function copyable(value, display = value) {
     const raw = String(value ?? '');
     if (!raw || raw === '—') return esc(display ?? '—');
-    return `<i class="copyable" data-copy="${esc(raw)}" title="Copy ${esc(raw)}">${esc(display ?? raw)}</i>`;
+    return `<i class="copyable" role="button" tabindex="0" data-copy="${esc(raw)}" title="Copy ${esc(raw)}">${esc(display ?? raw)}</i>`;
+  }
+
+  async function copyText(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      try {
+        const field = document.createElement('textarea');
+        field.value = value;
+        field.setAttribute('readonly', '');
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.appendChild(field);
+        field.select();
+        const ok = document.execCommand('copy');
+        field.remove();
+        return ok;
+      } catch {
+        return false;
+      }
+    }
   }
 
   function resultShell(kind, title, body, copyValue) {
@@ -2183,6 +2205,14 @@
       runSearch(id);
     });
 
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const el = event.target.closest?.('.copyable[data-copy]');
+      if (!el) return;
+      event.preventDefault();
+      el.click();
+    });
+
     document.addEventListener('click', async (event) => {
       const discover = event.target.closest('[data-discover]');
       if (discover) {
@@ -2225,14 +2255,8 @@
       if (copy) {
         event.preventDefault();
         const value = copy.getAttribute('data-copy');
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(value).then(
-            () => toast('Copied to clipboard'),
-            () => toast('Could not copy — select the text manually', true)
-          );
-        } else {
-          toast('Clipboard is not available in this browser', true);
-        }
+        const ok = await copyText(value);
+        toast(ok ? `Copied ${short(value, 10, 6)}` : 'Could not copy — select the text manually', !ok);
         return;
       }
 
