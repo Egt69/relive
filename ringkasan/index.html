@@ -214,12 +214,7 @@
               <span>of node slots online</span>
             </div>
             <div class="health-bar"><i id="health-bar"></i></div>
-            <div class="node-grid" id="nodes">
-              <div class="node-card skeleton"></div>
-              <div class="node-card skeleton"></div>
-              <div class="node-card skeleton"></div>
-              <div class="node-card skeleton"></div>
-            </div>
+            <p class="node-roster" id="node-roster">—</p>
           </article>
 
           <!-- wallets -->
@@ -329,16 +324,6 @@
             <div class="nft-collections" id="collection-grid">
               <div class="empty-state">Scanning recent activity for NFT contracts…</div>
             </div>
-            <div class="gallery-head">
-              <div>
-                <h3>Wallet artwork</h3>
-                <p class="panel-sub" id="gallery-sub">Pick a holder from the latest NFT activity</p>
-              </div>
-              <button class="btn btn-ghost btn-sm" id="load-holder" type="button">Load latest holder</button>
-            </div>
-            <div class="nft-gallery" id="gallery">
-              <div class="empty-state">No wallet loaded yet.</div>
-            </div>
           </article>
 
           <!-- tools -->
@@ -429,6 +414,8 @@
       <span class="footer-note">Independent summary, not affiliated with Retium. Data may lag the chain by a few seconds.</span>
     </div>
   </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js" defer></script>
 </body>

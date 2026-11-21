@@ -94,6 +94,63 @@
     return value === 'now' ? 'now' : value === '—' ? '—' : `${value} ago`;
   };
 
+  const copyable = (value, display = value) => {
+    const raw = String(value ?? '');
+    if (!raw) return esc(display ?? '—');
+    return `<i class="copyable" role="button" tabindex="0" data-copy="${esc(raw)}" title="Copy ${esc(raw)}">${esc(display ?? raw)}</i>`;
+  };
+
+  let toastTimer = null;
+  function toast(message, isError = false) {
+    const el = $('#toast');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('error', isError);
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  }
+
+  async function copyText(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      try {
+        const field = document.createElement('textarea');
+        field.value = value;
+        field.setAttribute('readonly', '');
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.appendChild(field);
+        field.select();
+        const ok = document.execCommand('copy');
+        field.remove();
+        return ok;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  function initCopy() {
+    document.addEventListener('click', async (event) => {
+      const el = event.target.closest('[data-copy]');
+      if (!el) return;
+      event.preventDefault();
+      const value = el.getAttribute('data-copy');
+      const ok = await copyText(value);
+      toast(ok ? `Copied ${short(value, 10, 6)}` : 'Could not copy — select the text manually', !ok);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const el = event.target.closest?.('[data-copy]');
+      if (!el) return;
+      event.preventDefault();
+      el.click();
+    });
+  }
+
   async function api(path, timeout = 15000) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeout);
@@ -360,16 +417,12 @@
     chip.textContent = all ? `${int(online)}/${int(all)} online` : '—';
     chip.classList.toggle('ok', all > 0 && online === all);
 
-    $('#nodes').innerHTML = rows.map(([role, on, total, sub]) => {
-      const safeTotal = Number(total) || 0;
-      const safeOn = Number(on) || 0;
-      const width = safeTotal ? Math.min(100, (safeOn / safeTotal) * 100) : 0;
-      return `<div class="node-card">
-        <div class="node-top"><span class="node-role">${esc(role)}</span><span class="node-val"><b>${int(safeOn)}</b>/${int(safeTotal)}</span></div>
-        <div class="node-bar"><i style="width:${width}%"></i></div>
-        <div class="node-sub">${esc(sub)}</div>
-      </div>`;
-    }).join('');
+    const roster = $('#node-roster');
+    if (roster) {
+      roster.innerHTML = rows.map(([role, on, total]) =>
+        `<span>${esc(role)} <b>${int(Number(on) || 0)}</b>/${int(Number(total) || 0)}</span>`
+      ).join('');
+    }
   }
 
   /* ---------------- wallets ---------------- */
@@ -503,7 +556,7 @@
         <i style="background:${color}"></i>
         <div class="wire-main">
           <b>${esc(actionLabel(tx.action))}</b>
-          <span>${esc(short(tx.sender, 10, 6))} → ${esc(short(tx.recipient, 10, 6))}</span>
+          <span>${copyable(tx.sender, short(tx.sender, 10, 6))} → ${copyable(tx.recipient, short(tx.recipient, 10, 6))}</span>
         </div>
         <div class="wire-value">${value}<small>${esc(agoLabel(tx.timestamp))}</small></div>
       </div>`;
@@ -673,7 +726,6 @@
       $('#s-nft').textContent = int(state.nftTotal);
       $('#s-nft-note').textContent = `across ${items.length} discovered contracts`;
       $('#nft-count').textContent = `${items.length} discovered`;
-      $('#gallery-sub').textContent = 'Pick a holder from the latest NFT activity';
 
       items.forEach((item) => hydrateCollection(item.id));
     } finally {
@@ -726,7 +778,7 @@
         </div>
         <div class="collection-info">
           <div class="collection-name"><span class="cname">${esc(item.name)}</span> <span class="tag">NFT</span></div>
-          <span class="collection-id">${esc(short(item.id, 14, 8))}</span>
+          <span class="collection-id">${copyable(item.id, short(item.id, 14, 8))}</span>
           <div class="collection-stats">
             <span>Supply <b>${int(item.supply)}</b></span>
             <span>Mints <b>${int(countMints(events))}</b></span>
@@ -737,57 +789,6 @@
       </div>`;
     }).join('');
     imageFallbacks(host);
-  }
-
-  function latestHolder() {
-    for (const item of state.collections) {
-      const events = [...(item.events || [])].sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
-      for (const event of events) {
-        const data = safeParse(event.data) || {};
-        const to = data.to || data.recipient;
-        if (typeof to === 'string' && /^rete[a-z0-9]+$/i.test(to)) return to;
-      }
-    }
-    return null;
-  }
-
-  async function loadGallery(address) {
-    const host = $('#gallery');
-    host.innerHTML = '<div class="empty-state">Loading artwork…</div>';
-    try {
-      const data = await api(`/wallet/${encodeURIComponent(address)}/nfts?limit=12&offset=0`);
-      const nfts = Array.isArray(data?.nfts) ? data.nfts : [];
-      if (!nfts.length) {
-        host.innerHTML = '<div class="empty-state">This wallet holds no NFTs right now.</div>';
-        return;
-      }
-
-      $('#gallery-sub').textContent = `${nfts.length} pieces · ${short(address, 10, 6)}`;
-
-      const cards = nfts.slice(0, 12);
-      host.innerHTML = cards.map((nft, i) => `<article class="nft-card">
-        <div class="nft-thumb">
-          <span class="nft-fallback">#${esc(nft.token_id)}</span>
-          <img alt="" decoding="async" data-slot="${i}" />
-        </div>
-        <div class="nft-meta">
-          <b class="nft-name" data-name="${i}">Token #${esc(nft.token_id)}</b>
-          <span class="nft-contract">${esc(short(nft.contract_id, 10, 6))}</span>
-        </div>
-      </article>`).join('');
-      imageFallbacks(host);
-
-      await Promise.all(cards.map(async (nft, i) => {
-        const meta = await tokenMeta(String(nft.contract_id).toLowerCase(), nft.token_id);
-        if (!meta) return;
-        const img = host.querySelector(`img[data-slot="${i}"]`);
-        const name = host.querySelector(`[data-name="${i}"]`);
-        if (name && meta.name) name.textContent = meta.name;
-        if (img && meta.image) img.src = meta.image;
-      }));
-    } catch (err) {
-      host.innerHTML = `<div class="empty-state">Could not load this wallet: ${esc(err.message)}</div>`;
-    }
   }
 
   function imageFallbacks(root) {
@@ -977,14 +978,14 @@
     });
 
     const chips = [...groups.entries()].map(([id, tokens]) =>
-      `<span data-col-chip="${esc(id)}">Collection ${esc(short(id, 6, 4))} · <b>${int(tokens.length)}</b></span>`
+      `<span class="copyable" data-col-chip="${esc(id)}" data-copy="${esc(id)}" title="Copy collection id">Collection ${esc(short(id, 6, 4))} · <b>${int(tokens.length)}</b></span>`
     ).join('');
 
     host.innerHTML = `
       <div class="tool-head">
         <div>
           <div class="tool-title">${int(data.total_count ?? nfts.length)} pieces · ${int(groups.size)} collections</div>
-          <div class="tool-id">${esc(wallet)}</div>
+          <div class="tool-id">${copyable(wallet, wallet)}</div>
         </div>
       </div>
       <div class="ledger-chips" style="margin-top:14px">${chips}</div>
@@ -992,7 +993,7 @@
         <div class="nft-thumb"><span class="nft-fallback">#${esc(nft.token_id)}</span><img alt="" decoding="async" data-wallet-img="${i}" /></div>
         <div class="nft-meta">
           <b class="nft-name" data-wallet-name="${i}">Token #${esc(nft.token_id)}</b>
-          <span class="nft-contract">${esc(short(nft.contract_id, 10, 6))}</span>
+          <span class="nft-contract">${copyable(nft.contract_id, short(nft.contract_id, 10, 6))}</span>
         </div>
       </article>`).join('')}</div>`;
 
@@ -1002,7 +1003,7 @@
       const meta = await tokenMeta(id, tokens[0]);
       const derived = meta?.name ? meta.name.replace(/\s*#?\d+\s*$/, '').trim() : '';
       const chip = host.querySelector(`[data-col-chip="${id}"]`);
-      if (chip && derived && !/^\d+$/.test(derived)) chip.innerHTML = `${esc(derived)} · <b>${int(tokens.length)}</b>`;
+      if (chip && derived && !/^\d+$/.test(derived)) chip.innerHTML = `${esc(derived)} · <small>${esc(short(id, 6, 4))}</small> · <b>${int(tokens.length)}</b>`;
     }));
 
     await Promise.all(nfts.map(async (nft, i) => {
@@ -1077,7 +1078,7 @@
         <div>
           <div class="tool-title">${esc(name)}</div>
           <div class="tool-type">${esc(typeLabel)}</div>
-          <div class="tool-id">${esc(clean)}</div>
+          <div class="tool-id">${copyable(clean, clean)}</div>
         </div>
         ${isFungible ? `<button type="button" class="btn btn-ghost btn-sm" data-open-token="${esc(clean)}" style="margin-left:auto">Open token page</button>` : ''}
       </div>
@@ -1089,7 +1090,7 @@
         <div class="fee-card"><span>Deployed at tick</span><strong>${esc(meta.deployed_at_tick ?? '—')}</strong></div>
         <div class="fee-card"><span>Capabilities</span><strong>${int(caps.length)}</strong></div>
       </div>
-      <p class="tool-note">Deployer <b>${esc(deployer)}</b> · traits: ${esc(traits.join(', ') || 'none')}</p>
+      <p class="tool-note">Deployer <b>${copyable(meta.deployer, deployer)}</b> · traits: ${esc(traits.join(', ') || 'none')}</p>
       ${isNft && !cover ? '<p class="tool-note warn">No artwork resolved yet — this contract may not expose <code>token_uri</code> metadata.</p>' : ''}
       ${isFungible ? '' : isNft ? '' : '<p class="tool-note warn">This looks like a non-NFT contract. Use the Token tab for fungible tokens.</p>'}
       ${recent.length ? `<div class="tool-section">
@@ -1102,7 +1103,7 @@
           const when = agoLabel(event.timestamp);
           return `<div class="event-row">
             <span class="ev-badge ${cls}">${esc(label)}</span>
-            <span class="ev-text">${esc(eventSummary(event))}</span>
+            <span class="ev-text">${eventSummary(event)}${event.tx_id ? `<small class="ev-tx">${copyable(event.tx_id, short(event.tx_id, 12, 6))}</small>` : ''}</span>
             <span class="ev-time">${esc(when)}</span>
           </div>`;
         }).join('')}
@@ -1122,10 +1123,11 @@
 
     host.innerHTML = '<div class="empty-state">Reading token, supply and pools…</div>';
 
-    const [meta, statusRaw, nameRaw, pools] = await Promise.all([
+    const [meta, statusRaw, nameRaw, eventsRes, pools] = await Promise.all([
       api(`/contract/${clean}`, 12000).catch(() => null),
       contractQuery(clean, 'status'),
       contractQuery(clean, 'name'),
+      api(`/contract/${clean}/events`, 15000).catch(() => null),
       loadPools()
     ]);
 
@@ -1147,6 +1149,43 @@
     const price = pool ? poolPrice(pool, info.decimals) : NaN;
     const rtmLiquidity = pool ? bigToNumber(pool.reserve_rtm, 18) : NaN;
     const tokenReserve = pool ? bigToNumber(pool.reserve_token, info.decimals) : NaN;
+    const supplyHuman = bigToNumber(supplyRaw, info.decimals);
+    const marketCap = Number.isFinite(supplyHuman) && Number.isFinite(price) ? supplyHuman * price : NaN;
+
+    const status = parseJson(statusRaw) || {};
+    const events = Array.isArray(eventsRes?.events) ? eventsRes.events : [];
+    const moves = events
+      .map((event) => ({ event, kind: String(event.event_type || '').toLowerCase(), data: parseJson(event.data) || {} }))
+      .filter(({ kind, data }) => /transfer|mint|burn/.test(kind) && data && typeof data === 'object');
+
+    const holders = new Set();
+    moves.forEach(({ data }) => {
+      [data.from, data.to].forEach((addr) => {
+        if (typeof addr !== 'string' || !/^rete[a-z0-9_]+$/i.test(addr) || addr === 'rete_burn') return;
+        holders.add(addr);
+      });
+    });
+
+    const recentMoves = moves.slice(0, 6);
+    const moveHtml = recentMoves.map(({ event, kind, data }) => {
+      const cls = kind.includes('mint') ? 'mint' : kind.includes('burn') ? 'burn' : 'transfer';
+      const from = typeof data.from === 'string' ? data.from : '';
+      const to = typeof data.to === 'string' ? data.to : '';
+      const value = data.amount ? `${fmtAmount(data.amount, info.decimals, 6)} ${info.symbol || ''}` : '';
+      const route = to
+        ? `${from && from !== '0x0' ? copyable(from, short(from, 8, 4)) : 'mint'} → ${copyable(to, short(to, 8, 4))}`
+        : from ? copyable(from, short(from, 8, 4)) : '';
+      const tx = event.tx_id ? `<small class="ev-tx">${copyable(event.tx_id, short(event.tx_id, 14, 6))}</small>` : '';
+      return `<div class="event-row">
+        <span class="ev-badge ${cls}">${esc(kind)}</span>
+        <span class="ev-text">${value ? `<b>${esc(value)}</b> · ` : ''}${route}${tx}</span>
+        <span class="ev-time">${esc(agoLabel(event.timestamp))}</span>
+      </div>`;
+    }).join('');
+
+    const creator = meta.deployer
+      ? copyable(meta.deployer, short(meta.deployer, 12, 8))
+      : '—';
 
     host.innerHTML = `
       <div class="tool-head">
@@ -1155,21 +1194,34 @@
           <div class="token-sym">${esc(info.symbol || short(clean, 8, 4))}</div>
           <div class="tool-title" style="font-size:14px;margin-top:4px">${esc(name || rcp.rcp_type || 'Token')}</div>
           <div class="tool-type">${esc(rcp.rcp_type || 'Token')} · ${isFungible ? 'fungible' : 'no fungible trait'} · ${info.decimals} decimals · ${esc(rcp.version || '—')}</div>
-          <div class="tool-id">${esc(clean)}</div>
+          <div class="tool-id">${copyable(clean, clean)}</div>
         </div>
         <span class="pill ${pool ? 'ok' : ''}" style="margin-left:auto">${pool ? `${pool.kind.toUpperCase()} pool` : 'no pool'}</span>
       </div>
       <div class="fee-grid tool-section">
         <div class="fee-card"><span>Total supply</span><strong>${esc(fmtAmount(supplyRaw, info.decimals, 2))} ${esc(info.symbol || '')}</strong></div>
+        <div class="fee-card"><span>Market cap</span><strong>${Number.isFinite(marketCap) ? `${amount(marketCap, 2)} RTM` : '—'}</strong></div>
         <div class="fee-card"><span>Price</span><strong>${Number.isFinite(price) ? `${amount(price, 6)} RTM` : '—'}</strong></div>
         <div class="fee-card"><span>Liquidity</span><strong>${Number.isFinite(rtmLiquidity) ? `${amount(rtmLiquidity, 2)} RTM` : '—'}</strong></div>
         <div class="fee-card"><span>Token reserve</span><strong>${Number.isFinite(tokenReserve) ? `${amount(tokenReserve, 2)} ${esc(info.symbol || '')}` : '—'}</strong></div>
         <div class="fee-card"><span>LP supply</span><strong>${pool?.lp_supply ? fmtAmount(pool.lp_supply, 18, 2) : '—'}</strong></div>
+        <div class="fee-card"><span>Holders (recent)</span><strong>${int(holders.size)}</strong></div>
         <div class="fee-card"><span>Pool type</span><strong>${pool ? pool.kind.toUpperCase() : 'none'}</strong></div>
       </div>
-      ${pool ? '' : '<p class="tool-note warn">No RTM pool on DexCore for this token, so price and liquidity cannot be derived on-chain.</p>'}
+      <div class="tool-meta">
+        <span>Creator <b>${creator}</b></span>
+        <span>Deployed tick <b>${esc(meta.deployed_at_tick ?? '—')}</b></span>
+        <span>Status <b>${esc(meta.status || '—')}</b>${status.paused ? ' · <b class="warn-text">paused</b>' : ''}</span>
+        <span>Events indexed <b>${int(events.length)}</b></span>
+      </div>
+      ${pool ? '' : '<p class="tool-note warn">No RTM pool on DexCore for this token, so price, market cap and liquidity cannot be derived on-chain.</p>'}
       ${isFungible ? '' : '<p class="tool-note warn">This contract has no <code>fungible</code> trait — it may still hold a supply, but it is not a standard token.</p>'}
-      ${pool && Number.isFinite(rtmLiquidity) ? `<p class="tool-note">Pool value is ${amount(rtmLiquidity * 2, 2)} RTM counting both sides, at a spot price of ${amount(price, 6)} RTM per ${esc(info.symbol || 'token')}. Prices move with every swap.</p>` : ''}`;
+      ${pool && Number.isFinite(rtmLiquidity) ? `<p class="tool-note">Pool value is ${amount(rtmLiquidity * 2, 2)} RTM counting both sides, at a spot price of ${amount(price, 6)} RTM per ${esc(info.symbol || 'token')}. Prices move with every swap.</p>` : ''}
+      <div class="tool-section">
+        <div class="mini-title split-title"><span>Recent movements</span><span>last ${int(events.length)} events</span></div>
+        ${moveHtml || '<div class="empty-state">No transfer events indexed for this token.</div>'}
+        <p class="tool-note">Holders are counted from unique addresses in the last ${int(events.length)} indexed events. Retium does not expose a full holder ledger publicly, so this is a recent-activity count, not the complete holder base.</p>
+      </div>`;
   }
 
 
@@ -1179,10 +1231,10 @@
     const from = typeof data.from === 'string' ? data.from : '';
     const to = typeof data.to === 'string' ? data.to : '';
     const parts = [];
-    if (tokenId !== undefined && tokenId !== null && tokenId !== '') parts.push(`#${tokenId}`);
-    if (to) parts.push(`${from && from !== '0x0' ? short(from, 8, 4) : 'mint'} → ${short(to, 8, 4)}`);
-    else if (from) parts.push(short(from, 8, 4));
-    if (!parts.length) return String(event.data || '').replace(/[{}"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (tokenId !== undefined && tokenId !== null && tokenId !== '') parts.push(`#${esc(tokenId)}`);
+    if (to) parts.push(`${from && from !== '0x0' ? copyable(from, short(from, 8, 4)) : 'mint'} → ${copyable(to, short(to, 8, 4))}`);
+    else if (from) parts.push(copyable(from, short(from, 8, 4)));
+    if (!parts.length) return esc(String(event.data || '').replace(/[{}"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120));
     return parts.join(' · ');
   }
 
@@ -1284,15 +1336,6 @@
     }
   });
 
-  $('#load-holder').addEventListener('click', () => {
-    const address = latestHolder();
-    if (!address) {
-      $('#gallery').innerHTML = '<div class="empty-state">No NFT holder found yet — scan the chain first.</div>';
-      return;
-    }
-    loadGallery(address);
-  });
-
   $('#refresh-btn').addEventListener('click', async (event) => {
     const button = event.currentTarget;
     button.classList.add('is-loading');
@@ -1325,6 +1368,7 @@
   });
 
   $('#year').textContent = new Date().getFullYear();
+  initCopy();
   loadCore();
   discoverCollections().catch(() => {
     $('#collection-grid').innerHTML = '<div class="empty-state">Could not scan the chain right now. Press “Scan chain” to retry.</div>';

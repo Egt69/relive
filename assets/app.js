@@ -1177,7 +1177,7 @@
           </div>
           <div class="collection-info">
             <div class="collection-name">${esc(item.ok ? item.name : 'Unavailable contract')} <span class="tag">RCP</span></div>
-            <span class="collection-id" title="${esc(item.id)}">${esc(item.id)}</span>
+            <span class="collection-id" title="${esc(item.id)}">${copyable(item.id, item.id)}</span>
             <div class="collection-stats">
               <span>Supply <b>${item.supply === null ? '—' : num(item.supply)}</b></span>
               <span>Mints <b>${num(item.counts.mints)}</b></span>
@@ -1203,9 +1203,9 @@
         body.innerHTML = events.map((event) => `<tr>
           <td><span class="ev-chip ${event.kind}">${event.kind === 'mint' ? 'Mint' : event.kind === 'burn' ? 'Burn' : event.kind === 'transfer' ? 'Transfer' : esc(event.type)}</span></td>
           <td class="amount"><span class="nft-token">${event.tokenId === null ? '' : `<span class="nft-mini" data-nft-contract="${esc(event.collection)}" data-nft-token="${esc(event.tokenId)}"><img hidden alt="" loading="lazy" decoding="async" /></span>`}${event.tokenId === null ? '—' : `#${esc(event.tokenId)}`}</span></td>
-          <td class="addr" title="${esc(event.from || '')}">${event.from ? esc(short(event.from, 8, 6)) : '—'}</td>
-          <td class="addr" title="${esc(event.to || '')}">${event.to ? esc(short(event.to, 8, 6)) : '—'}</td>
-          <td class="addr hide-sm" title="${esc(event.collection)}">${esc(event.collectionName || short(event.collection, 8, 6))}</td>
+          <td class="addr" title="${esc(event.from || '')}">${event.from ? copyable(event.from, short(event.from, 8, 6)) : '—'}</td>
+          <td class="addr" title="${esc(event.to || '')}">${event.to ? copyable(event.to, short(event.to, 8, 6)) : '—'}</td>
+          <td class="addr hide-sm" title="${esc(event.collection)}">${copyable(event.collection, event.collectionName || short(event.collection, 8, 6))}</td>
           <td class="addr" title="${esc(new Date(toMs(event.ts)).toISOString())}">${esc(timeAgo(event.ts))}</td>
         </tr>`).join('');
         queueNftArt(body, { eager: true });
@@ -1301,7 +1301,7 @@
           <div class="nft-meta">
             <span class="nft-name" data-nft-name>#${esc(id)}</span>
             <span class="nft-collection" title="${esc(name)}">${esc(name)}</span>
-            <span class="nft-contract" title="${esc(contract)}">token #${esc(id)} · ${esc(short(contract, 6, 4))}</span>
+            <span class="nft-contract" title="${esc(contract)}">token #${esc(id)} · ${copyable(contract, short(contract, 6, 4))}</span>
           </div>
         </article>`;
       }).join('') + (total > nfts.length
@@ -1503,18 +1503,18 @@
         items.push(['Safehouse balance', `${fmtAmount(Number(safehouse.inventory_rtm || 0), 2)} RTM`]);
         items.push(['RTM burned', `${fmtAmount(Number(safehouse.burned_rtm || 0), 2)} RTM`]);
         items.push(['RTD locked', `${fmtAmount(Number(safehouse.locked_rusd || 0), 2)} RTD`]);
-        items.push(['Safehouse wallet', short(safehouse.safehouse || '—', 12, 8)]);
+        items.push(['Safehouse wallet', short(safehouse.safehouse || '—', 12, 8), safehouse.safehouse]);
       }
       if (summary) {
         items.push(['Bridged away', `${fmtAtomic(summary.bridged_away_atomic, 18, 2)} RTD`]);
         items.push(['Expected supply', `${fmtAtomic(summary.expected_supply_atomic, 18, 2)} RTD`]);
         items.push(['Books match', summary.books_match ? 'Yes' : 'No']);
         items.push(['Backed', summary.backed ? 'Yes' : 'No']);
-        items.push(['Issuer wallet', short(summary.issuer_wallet || '—', 12, 8)]);
+        items.push(['Issuer wallet', short(summary.issuer_wallet || '—', 12, 8), summary.issuer_wallet]);
         items.push(['Last error', summary.last_error ? String(summary.last_error) : 'None']);
       }
-      facts.innerHTML = items.map(([label, value]) =>
-        `<div class="fact"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`
+      facts.innerHTML = items.map(([label, value, address]) =>
+        `<div class="fact"><span>${esc(label)}</span><strong>${address ? copyable(address, value) : esc(value)}</strong></div>`
       ).join('');
     }
   }
@@ -1528,6 +1528,12 @@
 
   function copyButton(text) {
     return `<button class="pill" type="button" data-copy="${esc(text)}" title="Copy to clipboard">Copy</button>`;
+  }
+
+  function copyable(value, display = value) {
+    const raw = String(value ?? '');
+    if (!raw || raw === '—') return esc(display ?? '—');
+    return `<i class="copyable" data-copy="${esc(raw)}" title="Copy ${esc(raw)}">${esc(display ?? raw)}</i>`;
   }
 
   function resultShell(kind, title, body, copyValue) {
@@ -1595,7 +1601,7 @@
           <span class="action" data-action="${esc(info.cls)}">${esc(info.label)}</span>
           <b>${esc(fmtAmount(tx.amount_rtm, 4))} RTM</b>
           <span class="spacer">${esc(timeAgo(tx.timestamp))}</span>
-          <span>${esc(short(tx.tx_id, 12, 6))}</span>
+          <span>${copyable(tx.tx_id, short(tx.tx_id, 12, 6))}</span>
         </button>`;
       }).join('')}</div>`
       : '<div class="empty-state">No transactions returned for this wallet.</div>';
@@ -1631,12 +1637,12 @@
     const kvRows = [
       kv('Type', metaInfo.rcp_type || 'Contract'),
       kv('Status', meta.status || 'unknown'),
-      kv('Deployer', short(meta.deployer || '—', 14, 8)),
+      meta.deployer ? kv('Deployer', '', { html: copyable(meta.deployer, short(meta.deployer, 14, 8)) }) : kv('Deployer', '—'),
       kv('Deployed at tick', num(meta.deployed_at_tick)),
       kv('Storage keys', num(meta.storage_keys_count)),
       supply !== null ? kv('Total supply', num(supply)) : '',
       kv('Version', metaInfo.version || '—'),
-      kv('Code hash', short(meta.code_hash || '—', 14, 8))
+      meta.code_hash ? kv('Code hash', '', { html: copyable(meta.code_hash, short(meta.code_hash, 14, 8)) }) : kv('Code hash', '—')
     ].join('');
 
     const caps = Array.isArray(metaInfo.capabilities) && metaInfo.capabilities.length
@@ -1652,7 +1658,7 @@
           <span class="ev-chip ${parsed.kind}">${esc(parsed.type)}</span>
           <span>${parsed.tokenId !== null ? `#${esc(parsed.tokenId)}` : ''}</span>
           <span class="spacer">${esc(timeAgo(event.timestamp))}</span>
-          <button class="chip" type="button" data-search="${esc(event.tx_id)}">${esc(short(event.tx_id, 10, 6))}</button>
+          <button class="chip" type="button" data-search="${esc(event.tx_id)}" title="Open transaction">${copyable(event.tx_id, short(event.tx_id, 10, 6))}</button>
         </div>`;
       }).join('')}</div>`
       : '<div class="empty-state">No events indexed for this contract.</div>';
@@ -1674,8 +1680,8 @@
       kv('Status', tx.status || tx.finality || '—'),
       kv('Amount', `${fmtAmount(tx.amount_rtm, 8)} RTM`),
       kv('Fee', gas.gas_used_rtm ? `${fmtAmount(gas.gas_used_rtm, 8)} RTM` : '—'),
-      kv('Sender', short(tx.sender || '—', 16, 8)),
-      kv('Recipient', short(tx.recipient || '—', 16, 8)),
+      tx.sender ? kv('Sender', '', { html: copyable(tx.sender, short(tx.sender, 16, 8)) }) : kv('Sender', '—'),
+      tx.recipient ? kv('Recipient', '', { html: copyable(tx.recipient, short(tx.recipient, 16, 8)) }) : kv('Recipient', '—'),
       kv('Block', num(tx.block_id)),
       kv('Tick', num(tx.tick)),
       kv('Nonce', num(tx.nonce)),
@@ -1725,7 +1731,7 @@
       ? `<div class="mini-list">${txs.slice(0, 10).map((tx) => `<button class="mini-item" type="button" data-search="${esc(tx.tx_id)}" style="text-align:left;cursor:pointer">
           <span class="action" data-action="transfer">TX</span>
           <b>${esc(fmtAmount(tx.amount_rtm, 4))} RTM</b>
-          <span>${esc(short(tx.sender, 8, 5))} → ${esc(short(tx.recipient, 8, 5))}</span>
+          <span>${copyable(tx.sender, short(tx.sender, 8, 5))} → ${copyable(tx.recipient, short(tx.recipient, 8, 5))}</span>
           <span class="spacer">${esc(timeAgo(tx.timestamp))}</span>
         </button>`).join('')}</div>`
       : '<div class="empty-state">This block carries no transactions.</div>';
@@ -1807,7 +1813,7 @@
       } else {
         const body = $('#tx-body');
         if (body) {
-          body.innerHTML = `<tr><td colspan="6" class="empty-cell">Could not load transactions. <button class="chip" type="button" data-retry="feeds">Retry</button></td></tr>`;
+          body.innerHTML = `<tr><td colspan="7" class="empty-cell">Could not load transactions. <button class="chip" type="button" data-retry="feeds">Retry</button></td></tr>`;
         }
         const pill = $('#feed-status');
         if (pill) { pill.textContent = 'retry'; pill.classList.remove('ok'); pill.classList.add('warn'); }
@@ -1843,7 +1849,7 @@
     const body = $('#tx-body');
     if (!body) return;
     if (!state.transactions.length) {
-      body.innerHTML = '<tr><td colspan="6" class="empty-cell">Loading transactions…</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" class="empty-cell">Loading transactions…</td></tr>';
       return;
     }
     const filter = state.txFilter;
@@ -1855,7 +1861,7 @@
     setText('#feed-sub', `Showing ${num(list.length)} of ${num(state.transactions.length)} newest actions`);
 
     if (!list.length) {
-      body.innerHTML = `<tr><td colspan="6" class="empty-cell">No matching transactions in the latest batch.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="7" class="empty-cell">No matching transactions in the latest batch.</td></tr>`;
       return;
     }
 
@@ -1865,10 +1871,11 @@
       return `<tr class="${isNew ? 'is-new' : ''}" data-search="${esc(tx.tx_id)}" title="Open ${esc(tx.tx_id)} in the explorer" style="cursor:pointer">
       <td><span class="action" data-action="${esc(info.cls)}">${esc(info.label)}</span></td>
       <td class="amount">${esc(fmtAmount(tx.amount_rtm, 4))}${tx.amount_rtm && Number(tx.amount_rtm) !== 0 ? '<small>RTM</small>' : ''}</td>
-      <td class="addr" title="${esc(tx.sender || '')}">${esc(short(tx.sender, 9, 6))}</td>
-      <td class="addr" title="${esc(tx.recipient || '')}">${esc(short(tx.recipient, 9, 6))}</td>
+      <td class="addr" title="${esc(tx.sender || '')}">${tx.sender ? copyable(tx.sender, short(tx.sender, 9, 6)) : '—'}</td>
+      <td class="addr" title="${esc(tx.recipient || '')}">${tx.recipient ? copyable(tx.recipient, short(tx.recipient, 9, 6)) : '—'}</td>
       <td class="addr hide-sm">${num(tx.tick)}</td>
       <td class="addr" title="${esc(tx.timestamp_readable || '')}">${esc(timeAgo(tx.timestamp))}</td>
+      <td class="addr hide-sm" title="${esc(tx.tx_id || '')}">${tx.tx_id ? copyable(tx.tx_id, short(tx.tx_id, 10, 4)) : '—'}</td>
     </tr>`;
     }).join('');
 
